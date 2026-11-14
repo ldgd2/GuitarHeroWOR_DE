@@ -8,8 +8,8 @@ __pycache__/
 EditorSong/cache/
 EditorSong/backups/
 EditorSong/projects/
-cache/*
-backups/*
-projects/*
+/cache/*
+/backups/*
+/projects/*
 re-wor/cache/
 *.log
