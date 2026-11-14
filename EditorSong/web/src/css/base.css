@@ -1,0 +1,59 @@
+/* Colores, tipografia y controles basicos. */
+:root {
+  --bg: #0f1116; --panel: #171a21; --panel2: #1f232c; --panel3: #282d38; --line: #2c3240; --line2: #3a4252;
+  --text: #e8eaf0; --muted: #8b93a4; --accent: #f5a83b; --accent-ink: #1d1304; --accent2: #5aa9ff;
+  --danger: #ff6464; --ok: #4fd18b; --radius: 8px; --ease: cubic-bezier(.2, .8, .2, 1);
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  font: 13px/1.45 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+::selection { background: var(--accent2); color: #fff; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--panel3); border-radius: 6px; border: 2px solid var(--panel); }
+::-webkit-scrollbar-track { background: transparent; }
+
+button, select, input { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 9px; outline: none; transition: border-color .15s, background .15s, transform .1s, box-shadow .15s; }
+input:focus, select:focus { border-color: var(--accent2); box-shadow: 0 0 0 3px rgba(90, 169, 255, .18); }
+button { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+button:hover:not(:disabled) { border-color: var(--line2); background: var(--panel3); }
+button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: linear-gradient(180deg, #ffb851, var(--accent)); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: linear-gradient(180deg, #ffc46a, #f8b04a); box-shadow: 0 0 0 3px rgba(245, 168, 59, .2); }
+button.danger { color: var(--danger); border-color: rgba(255, 100, 100, .45); background: transparent; }
+button.danger:hover:not(:disabled) { background: rgba(255, 100, 100, .12); border-color: var(--danger); }
+button.ghost { background: transparent; border-color: transparent; }
+button.ghost:hover:not(:disabled) { background: var(--panel3); border-color: transparent; }
+button.small { padding: 2px 7px; font-size: 11px; }
+input[type=range] { padding: 0; border: 0; background: none; accent-color: var(--accent); box-shadow: none; }
+.ico { flex: none; }
+kbd { font: 11px ui-monospace, Consolas, monospace; background: var(--panel3); border: 1px solid var(--line2); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 4px; color: var(--text); }
+code { font: 12px ui-monospace, Consolas, monospace; background: var(--panel3); border-radius: 4px; padding: 0 4px; word-break: break-all; }
+
+/* interruptor (checkbox) */
+.check { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 3px 0; user-select: none; }
+.check input { display: none; }
+.check .box { width: 30px; height: 17px; border-radius: 9px; background: var(--panel3); border: 1px solid var(--line2); position: relative; flex: none;
+  transition: background .2s var(--ease), border-color .2s; }
+.check .box::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--muted);
+  transition: transform .2s var(--ease), background .2s; }
+.check input:checked + .box { background: rgba(245, 168, 59, .3); border-color: var(--accent); }
+.check input:checked + .box::after { transform: translateX(13px); background: var(--accent); }
+
+.muted { color: var(--muted); } .small { font-size: 11px; }
+.warn { color: var(--accent); } .err { color: var(--danger); } .okc { color: var(--ok); }
+canvas { display: block; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.fade { animation: fadeUp .25s var(--ease); }
+
+#boot { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center; justify-items: center; gap: 4px; background: var(--bg);
+  color: var(--muted); transition: opacity .4s; }
+#boot.done { opacity: 0; pointer-events: none; }
+.spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--panel3); border-top-color: var(--accent); animation: spin .8s linear infinite; }

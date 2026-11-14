@@ -1,0 +1,127 @@
+[ReWorApp::Create] Constructing ReWorApp
+[ReWorApp::Create] Done
+[ReWorApp::OnConfigurePaths] Resolving application paths dynamically...
+[ReWorApp::OnConfigurePaths] Base Directory: C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor
+[ReWorApp::OnConfigurePaths] Game Data Root: C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\assets
+[ReWorApp::OnConfigurePaths] User Data Root: C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\user
+[ReWorApp::OnConfigurePaths] Cache Root:     C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\cache
+[ReWorApp::OnPreSetup] Initializing audio and input systems
+[ReWorApp::OnFinalizePaths] Final Game Root: C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\assets
+[ReWorApp::OnPostSetup] XEX loaded, runtime ready
+[Hooks::Init] Filling null entries in function dispatch table...
+[Hooks::Init] Filled 1805981 null entries out of 1833204 total (27223 mapped)
+[MemoryHeaps] Initializing expanded 64-bit PC memory subsystem
+[MemoryHeaps]   Heap Multiplier:  8x
+[MemoryHeaps]   SongHeap Limit:   2048 MB
+[MemoryHeaps]   Max Memory Cap:   4096 MB
+[InputManager] Initializing Unified Instrument & Controller Architecture...
+[InputManager]   Framerate Decoupling: ENABLED
+[InputManager]   Target Refresh Rate:  144 Hz
+[InputManager]   Target Resolution:    1920x1080
+[Input::Guitar] Subsystem initialized. Santroller detection: ENABLED, Tilt sensitivity: 0.75
+[Input::Drums] Subsystem initialized. 5-Lane Mode: ACTIVE (GH Layout), Velocity Sensing: ENABLED
+[Input::Bass] Subsystem initialized. Open notes: ENABLED, Touch strip: ENABLED
+[Input::Microphone] Subsystem initialized. Pitch detection: ENABLED, Percussion tap: ENABLED
+[Input::Gamepad] Subsystem initialized. Rumble: ENABLED, Stick deadzone: 0.15
+[InputManager] All 4 instrument slots configured successfully
+[DiscordRPC] Initialized successfully
+[ReWorApp::OnPostSetup] Setup completed successfully
+[Hooks::Init::sub_822CCB60] Safe CRT init started
+[Hooks::Init::sub_822CCB60] Stage 2: table1 (0x827D2720-0x827D272C)
+[Hooks::Init::sub_822CCB60] Stage 3: table2 (0x827D0414-0x827D271C)
+[Hooks::Init::sub_822CCB60] Done: called=1374 skipped=0 crashed=0
+[ModVFS::ResolvePath] Incoming query: '\data'
+[ModVFS] FOUND in base: \Device\Harddisk0\Partition1\data
+[Hooks::Materials::sub_82424B68] Loading chunk/archive: '\Compressed\compress.toc.xen' out_ptr=0x829a887c
+[Hooks::Materials::sub_82424B68] SUCCESS: Loaded 'C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\assets\data\compressed\compress.toc.xen' (32768 bytes payload) -> 0xaac1f3a0
+[Hooks::VFS::LoadFile] Requesting: 'scripts\engine\engine_params.qb.xen' (dest=0x0)
+[Hooks::VFS::LoadFile] SUCCESS: Loaded 'C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\assets\data\scripts\engine\engine_params.qb.xen' (23524 bytes) -> 0xaac42340
+[Hooks::Scripts::sub_823DB618] Entering sub_823DB618
+[Hooks::Materials::sub_825A3840] Entering MaterialLibrary processor for: 'fxfiles\MaterialLibrary.bin.xen'
+[Hooks::Materials::sub_82424B68] Loading chunk/archive: 'fxfiles\MaterialLibrary.bin.xen' out_ptr=0x7086fac0
+[Hooks::Materials::sub_82424B68] SUCCESS: Loaded 'C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\assets\data\fxfiles\MaterialLibrary.bin.xen' (8912896 bytes payload) -> 0xbf41ff80
+[Hooks::Materials::sub_825A3840] Finished MaterialLibrary processing. Result r3=1
+[Hooks::Graphics::sub_825F1DA8] Entering GPU/Shader pipeline setup
+[Hooks::Graphics::sub_825F1DA8] Finished GPU/Shader pipeline setup cleanly
+[Hooks::Graphics::sub_824D7B50] Font/Text system init
+[Hooks::Graphics::sub_824C7788] 2D Viewport setup
+[Hooks::Graphics::sub_824C7788] Done
+[Hooks::Graphics::sub_824C7788] 2D Viewport setup
+[Hooks::Graphics::sub_824C7788] Done
+[Hooks::Graphics::sub_824D7B50] Font/Text system done
+[Hooks::Scripts::sub_823DB618] Finished cleanly
+[Hooks::Graphics::sub_8253F2F8] Loading image display setup
+[Hooks::VFS::LoadFile] Requesting: 'ui_images/loading/boot_legal_EU.img.xen' (dest=0x0)
+[Hooks::VFS::LoadFile] SUCCESS: Loaded 'C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\assets\data\ui_images\LOADING\boot_legal_eu.img.xen' (229376 bytes) -> 0xac5bc000
+[Hooks::Graphics::sub_8253F2F8] Loading image display setup done
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0xc472ecc5 -> dummy node 0xaad209b0
+[Hooks::Scripts::sub_82401A28] LoadPak called with struct at 0x7086fce8
+[Hooks::VFS::FileStream::Open] sub_82422E58 requested: 'pak/qb.pak.xen'
+[Hooks::VFS::sub_8256E3A8] Redirected: 'Compressed\pak/qb.pak.xen' -> 'pak/qb.pak.xen'
+[Hooks::VFS::sub_8256E3A8] Opening stream path: 'pak/qb.pak.xen' (flags=0x131)
+[ModVFS::ResolvePath] Incoming query: '\data\pak'
+[ModVFS] FOUND in base: \Device\Harddisk0\Partition1\data\pak
+[Hooks::VFS::NtCreateFile] result handle=0x0
+[Hooks::VFS::sub_8256E3A8] Result r3=0xaac096bc
+[Hooks::VFS::FileStream::Open] sub_82422E58 result r3=0xaac096bc
+[Hooks::VFS::FileStream::Open] sub_82422E58 requested: 'pak/qb.pab.xen'
+[Hooks::VFS::sub_8256E3A8] Redirected: 'Compressed\pak/qb.pab.xen' -> 'pak/qb.pab.xen'
+[Hooks::VFS::sub_8256E3A8] Opening stream path: 'pak/qb.pab.xen' (flags=0x131)
+[ModVFS::ResolvePath] Incoming query: '\data\pak'
+[ModVFS] FOUND in base: \Device\Harddisk0\Partition1\data\pak
+[Hooks::VFS::NtCreateFile] result handle=0x0
+[Hooks::VFS::sub_8256E3A8] Result r3=0xaac08c54
+[Hooks::VFS::FileStream::Open] sub_82422E58 result r3=0xaac08c54
+[Hooks::Graphics::sub_822DDDA8] Clamping count from ffff0000 to 41 to avoid stack overflow
+[Hooks::Scripts::sub_82401A28] LoadPak done, result r3=0x1
+[Hooks::Scripts::ScriptInjection] Base scripts (pak/pab) fully loaded. Notifying VFS Mod Loader.
+[Hooks::Scripts::sub_82401A28] LoadPak called with struct at 0x7086fce8
+[Hooks::VFS::FileStream::Open] sub_82422E58 requested: 'pak/qs.pak.xen'
+[Hooks::VFS::sub_8256E3A8] Redirected: 'Compressed\pak/qs.pak.xen' -> 'pak/qs.pak.xen'
+[Hooks::VFS::sub_8256E3A8] Opening stream path: 'pak/qs.pak.xen' (flags=0x131)
+[ModVFS::ResolvePath] Incoming query: '\data\pak'
+[ModVFS] FOUND in base: \Device\Harddisk0\Partition1\data\pak
+[Hooks::VFS::NtCreateFile] result handle=0x0
+[Hooks::VFS::sub_8256E3A8] Result r3=0xaac08c54
+[Hooks::VFS::FileStream::Open] sub_82422E58 result r3=0xaac08c54
+[Hooks::Scripts::sub_82401A28] LoadPak done, result r3=0x1
+[Hooks::Scripts::sub_82401A28] LoadPak called with struct at 0x7086fcf0
+[Hooks::VFS::FileStream::Open] sub_82422E58 requested: 'pak/global_textures.pak.xen'
+[Hooks::VFS::sub_8256E3A8] Redirected: 'Compressed\pak/global_textures.pak.xen' -> 'pak/global_textures.pak.xen'
+[Hooks::VFS::sub_8256E3A8] Opening stream path: 'pak/global_textures.pak.xen' (flags=0x131)
+[ModVFS::ResolvePath] Incoming query: '\data\pak'
+[ModVFS] FOUND in base: \Device\Harddisk0\Partition1\data\pak
+[Hooks::VFS::NtCreateFile] result handle=0x0
+[Hooks::VFS::sub_8256E3A8] Result r3=0xaac08c54
+[Hooks::VFS::FileStream::Open] sub_82422E58 result r3=0xaac08c54
+[Hooks::VFS::FileStream::Open] sub_82422E58 requested: 'pak/global_textures.pab.xen'
+[Hooks::VFS::sub_8256E3A8] Redirected: 'Compressed\pak/global_textures.pab.xen' -> 'pak/global_textures.pab.xen'
+[Hooks::VFS::sub_8256E3A8] Opening stream path: 'pak/global_textures.pab.xen' (flags=0x131)
+[ModVFS::ResolvePath] Incoming query: '\data\pak'
+[ModVFS] FOUND in base: \Device\Harddisk0\Partition1\data\pak
+[Hooks::VFS::NtCreateFile] result handle=0x0
+[Hooks::VFS::sub_8256E3A8] Result r3=0xaac081ec
+[Hooks::VFS::FileStream::Open] sub_82422E58 result r3=0xaac081ec
+[Hooks::Scripts::sub_82401A28] LoadPak done, result r3=0x1
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0x46b5e4 -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0x77162a44 -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0xcd1c7d78 -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0x3b2b4202 -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0x21cb45ee -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0xd2f69c2a -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0x64abb0d0 -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0xa1a26d80 -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0x8ed1b9eb -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0xfd4edebf -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0xae850b9c -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0x3545676e -> dummy node 0xaad209b0
+[Hooks::Scripts::QBSymbol] Resolved missing symbol 0xdad1f6f6 -> dummy node 0xaad209b0
+[Hooks::VFS::LoadFile] Requesting: 'pak\archive\cas_globalarchive.pak.xen' (dest=0x0)
+[Hooks::VFS::LoadFile] SUCCESS: Loaded 'C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor\assets\data\pak\archive\cas_globalarchive.pak.xen' (4096 bytes) -> 0xbfc9efc0
+[Hooks::VFS::FileStream::Open] sub_82422E58 requested: 'pak\archive\cas_globalarchive.pab.xen'
+[Hooks::VFS::sub_8256E3A8] Opening stream path: 'pak\archive\cas_globalarchive.pab.xen' (flags=0x121)
+[Hooks::VFS::sub_8256E3A8] Result r3=0xaac081ec
+[Hooks::VFS::FileStream::Open] sub_82422E58 result r3=0xaac081ec
+[ModVFS::ResolvePath] Incoming query: '\data\pak\archive'
+[ModVFS] FOUND in base: \Device\Harddisk0\Partition1\data\pak\archive
+[Hooks::VFS::NtCreateFile] result handle=0x0

@@ -1,0 +1,103 @@
+/* Transporte y linea de tiempo (grupos con subpistas). */
+#ui-transport { display: flex; gap: 10px; align-items: center; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.play { width: 36px; height: 36px; border-radius: 50%; justify-content: center; padding: 0; background: var(--accent); color: var(--accent-ink); border: 0; flex: none; }
+.play:hover:not(:disabled) { background: #ffbb5c; }
+.play.on { background: var(--panel3); color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.clock { font: 600 15px ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; min-width: 150px; }
+.clock small { color: var(--muted); font-weight: 400; font-size: 11px; }
+.zoom { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.zoom input { width: 100px; }
+.vol { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.vol input { width: 80px; }
+.audioState { font-size: 11px; color: var(--muted); max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.audioState.ok { color: var(--ok); }
+
+/* separador arrastrable entre la escena y la linea de tiempo */
+#tlResize { height: 8px; cursor: ns-resize; background: var(--panel); border-top: 1px solid var(--line); position: relative; flex: none; }
+#tlResize::after { content: ""; position: absolute; left: 50%; top: 2px; width: 46px; height: 3px; margin-left: -23px; border-radius: 2px; background: var(--line2); transition: background .15s; }
+#tlResize:hover::after, #tlResize.drag::after { background: var(--accent); }
+
+.tlBox { flex: 1; overflow-y: auto; overflow-x: hidden; background: #111318; }
+.tl { position: relative; user-select: none; touch-action: none; min-height: 100%; padding-bottom: 30px; }
+.tl.empty { display: grid; place-items: center; color: var(--muted); }
+.tlGrid { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 0; }
+
+.ruler { position: sticky; top: 0; z-index: 8; display: flex; background: var(--panel); border-bottom: 1px solid var(--line); box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+.rhead { display: flex; gap: 4px; align-items: center; padding: 0 6px; border-right: 1px solid var(--line); box-sizing: border-box; flex: none; }
+.ruler canvas { display: block; }
+
+.tb { height: 22px; min-width: 22px; padding: 0 5px; gap: 4px; justify-content: center; border: 0; background: transparent; color: var(--muted); border-radius: 5px; font-size: 11px; }
+.tb:hover:not(:disabled) { background: var(--panel3); color: var(--text); }
+.tb.on { color: var(--accent); }
+.tb:disabled { opacity: .3; }
+
+/* grupo */
+.grp { position: relative; z-index: 1; margin-top: 8px; }
+.grow { display: flex; }
+.ghead { display: flex; flex: none; }
+.gcell { display: flex; align-items: center; gap: 5px; padding: 0 4px 0 6px; box-sizing: border-box; position: relative;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c) 22%, var(--panel2)), var(--panel2)); border-left: 3px solid var(--c);
+  border-radius: 7px 0 0 7px; font-weight: 600; font-size: 12.5px; }
+.gcell .chev { width: 22px; height: 22px; padding: 0; justify-content: center; border: 0; background: transparent; color: var(--text); transition: transform .25s var(--ease); }
+.gcell .chev.open { transform: rotate(90deg); }
+.gicon { color: var(--c); display: flex; }
+.gname { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gcount { font-size: 10px; font-weight: 400; color: var(--muted); }
+.gsum { position: relative; height: 30px; background: color-mix(in srgb, var(--c) 7%, transparent); border-radius: 0 7px 7px 0; overflow: hidden; }
+.gsum i { position: absolute; top: 9px; height: 12px; border-radius: 2px; opacity: .75; }
+.gbody { position: relative; border-left: 3px solid color-mix(in srgb, var(--c) 45%, transparent); }
+
+/* subpista */
+.trk { display: flex; position: relative; border-bottom: 1px solid rgba(255,255,255,.04); }
+.trk:hover .thead { background: var(--panel2); }
+.trk.off .lane { opacity: .35; filter: grayscale(.7); }
+.thead { display: flex; align-items: center; gap: 2px; padding: 0 3px 0 12px; box-sizing: border-box; background: var(--panel); flex: none;
+  border-right: 1px solid var(--line); position: relative; z-index: 3; font-size: 12px; transition: background .12s; }
+.thead .tname { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: text; }
+.thead .kind { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 1px 5px; border-radius: 6px; background: var(--bg); margin-right: 2px; }
+.thead.off .tname { color: var(--muted); text-decoration: line-through; }
+.thead .tb { opacity: .55; }
+.trk:hover .thead .tb, .thead .tb.on { opacity: 1; }
+.rename { height: 22px; padding: 0 6px; font-size: 12px; flex: 1; min-width: 0; }
+.lane { position: relative; flex: none; overflow: hidden; }
+.lane .wave { position: absolute; left: 0; top: 0; }
+.laneMsg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 11px; white-space: nowrap; }
+.k_audio .lane { background: linear-gradient(180deg, rgba(90,169,255,.07), rgba(90,169,255,.02)); }
+.k_stem .lane { background: rgba(255,255,255,.012); }
+.k_shots .lane { background: rgba(90,169,255,.035); }
+.emptyTrk { height: 34px; }
+
+/* bloques */
+.it { position: absolute; top: 4px; border-radius: 6px; background: var(--c); box-sizing: border-box; overflow: hidden; cursor: grab; z-index: 1;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), inset 0 -10px 14px rgba(0,0,0,.2); transition: box-shadow .12s, filter .12s; transform-origin: center; }
+.it:hover { filter: brightness(1.2); z-index: 2; }
+.it.sel { box-shadow: 0 0 0 2px #fff, 0 4px 16px rgba(0,0,0,.55); z-index: 2; }
+.it span { position: absolute; left: 7px; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.it.pt { border-radius: 2px; }
+.it.shot { background: linear-gradient(180deg, color-mix(in srgb, var(--c) 80%, #fff), var(--c)); }
+.it.shot span { font-weight: 600; }
+.it .grip { position: absolute; right: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; background: rgba(0,0,0,.25); }
+
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 9; pointer-events: none; box-shadow: 0 0 10px rgba(245,168,59,.7); }
+.playhead i { position: sticky; top: 0; display: block; margin-left: -6px; width: 0; border: 7px solid transparent; border-top-color: var(--accent); }
+
+/* menu emergente */
+.menu { position: absolute; top: 100%; right: 4px; z-index: 50; min-width: 210px; padding: 5px; background: var(--panel2); border: 1px solid var(--line2);
+  border-radius: 9px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 1px; font-weight: 400; }
+.menu button { justify-content: flex-start; gap: 8px; border: 0; background: transparent; font-size: 12px; padding: 6px 8px; text-align: left; }
+.menu button:hover:not(:disabled) { background: var(--panel3); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; width: auto; }
+.menu .mtitle { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 4px 8px 2px; }
+
+/* efectos de imagen sobre el monitor */
+.fxLayer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.fxLayer .bar { position: absolute; left: 0; right: 0; height: 0; background: #000; }
+.fxLayer .bar.top { top: 0; }
+.fxLayer .bar.bot { bottom: 0; }
+.fxLayer .vig { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.85) 100%); }
+.fxLayer .chroma { position: absolute; inset: 0; opacity: 0; mix-blend-mode: screen;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(255,0,60,.18) 80%, rgba(0,160,255,.22) 100%); }
+.fxLayer .flash { position: absolute; inset: 0; background: #fff; opacity: 0; }
+.fxLayer .fx2d { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fxLayer .fade { position: absolute; inset: 0; background: #000; opacity: 0; }
