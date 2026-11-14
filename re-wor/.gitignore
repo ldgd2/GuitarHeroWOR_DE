@@ -2,7 +2,7 @@
 out/
 build/
 generated/
-
+cache/*
 # IDE
 .vs/
 .vscode/
