@@ -12,6 +12,10 @@ import { newShot, worldPose } from '../camera/shots.js';
 import { keepRendering, mon, onAfterMonitor, onFrame, progCam } from '../viewport/scene.js';
 import { seek, setPlaying } from '../ui/playback.js';
 
+// Enganches para que otro modulo (el editor de keyframes) reciba la grabacion en su copia de la toma
+// en vez de en el proyecto: target() -> objeto con forma de toma, before() antes de grabar, after() al acabar.
+export const VCAM_HOOKS = { target: null, before: null, after: null };
+
 export const VCAM = { ws: null, info: null, editor: false, phone: false, live: false, rec: false, target: null,
   pose: { q: [0, 0, 0, 1], p: [0, 0, 0], zoom: 1 }, base: null, shot: null, growing: false, lastKey: -1, fps: 12, error: '' };
 
@@ -56,8 +60,9 @@ const progPose = () => {
 
 function startRec() {
   if (!S.proj || VCAM.rec) return;
-  pushUndo();
-  let s = S.proj.shots?.find(x => x.id === VCAM.target) || (S.sel?.type === 'shot' && S.proj.shots?.find(x => x.id === S.sel.id));
+  const hooked = VCAM_HOOKS.target?.();
+  if (hooked) VCAM_HOOKS.before?.(); else pushUndo();
+  let s = hooked || S.proj.shots?.find(x => x.id === VCAM.target) || (S.sel?.type === 'shot' && S.proj.shots?.find(x => x.id === S.sel.id));
   VCAM.growing = !s;
   if (!s) {   // sin toma elegida: una nueva en el cursor, desde la camara que se ve ahora
     s = newShot(S.t, S.shotRole || 'guitarist', 'keys'); s.dur = 600000;
@@ -80,7 +85,10 @@ function stopRec() {
     if (VCAM.growing) s.dur = Math.max(500, s.keys.at(-1)?.t || 500);
     if (!s.keys.length) { const b = VCAM.base; s.keys = [{ t: 0, p: b.p.toArray(), q: b.q.toArray(), fov: b.fov }]; }
   }
-  VCAM.base = null; changed(); sendState();
+  const hooked = VCAM_HOOKS.target?.() === s;
+  VCAM.base = null;
+  if (hooked) VCAM_HOOKS.after?.(); else changed();
+  sendState();
 }
 
 // pose final = pose de partida + movimiento del movil. El giro es relativo a la camara de partida; el desplazamiento

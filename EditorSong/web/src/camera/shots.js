@@ -71,30 +71,38 @@ export function localPose(s, t) {
 }
 
 // ---------- animacion personalizada (keyframes) ----------
-// s.keys = [{t: ms desde el inicio de la toma, p: [x,y,z] mundo, q: [x,y,z,w] (three, mira a -Z), fov: horizontal}]
-// s.interp: 'smooth' (Catmull-Rom en posicion, slerp suavizado) | 'linear'
+// s.keys = [{t: ms desde el inicio de la toma, p: [x,y,z] mundo, q: [x,y,z,w] (three, mira a -Z), fov: horizontal,
+//            ease?: como se va de ESTA clave a la siguiente (ver EASES; sin ease = s.interp)}]
+// s.interp: 'smooth' (Catmull-Rom en posicion) | 'linear' (por defecto de las claves sin ease)
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
 const V = a => new THREE.Vector3(a[0], a[1], a[2]);
+export const EASES = [['auto', 'Como la toma'], ['smooth', 'Curva suave'], ['linear', 'Lineal'], ['easeInOut', 'Acelerar y frenar'],
+  ['easeIn', 'Acelerar'], ['easeOut', 'Frenar'], ['hold', 'Mantener (corte)']];
+const EASE_FN = {
+  linear: f => f, smooth: f => f, hold: () => 0,
+  easeIn: f => f * f * f, easeOut: f => 1 - (1 - f) ** 3,
+  easeInOut: f => (f < 0.5 ? 4 * f * f * f : 1 - (-2 * f + 2) ** 3 / 2),
+};
+export const keyEase = (s, k) => (k.ease && k.ease !== 'auto' ? k.ease : s.interp === 'linear' ? 'linear' : 'smooth');
 export function keyPose(s, t) {
   const K = s.keys, rt = t - s.t, u = Math.min(1, Math.max(0, rt / Math.max(1, s.dur)));
   if (rt <= K[0].t || K.length === 1) return { p: V(K[0].p), q: new THREE.Quaternion(...K[0].q), fov: K[0].fov, u };
   const L = K.at(-1);
   if (rt >= L.t) return { p: V(L.p), q: new THREE.Quaternion(...L.q), fov: L.fov, u };
   let i = 1; while (i < K.length - 1 && K[i].t < rt) i++;
-  const a = K[i - 1], b = K[i];
-  let f = (rt - a.t) / Math.max(1e-6, b.t - a.t);
-  let p;
-  if (s.interp === 'linear') p = V(a.p).lerp(V(b.p), f);
-  else {
+  const a = K[i - 1], b = K[i], mode = keyEase(s, a);
+  const f0 = (rt - a.t) / Math.max(1e-6, b.t - a.t), f = EASE_FN[mode](f0);
+  let p, fr = f;
+  if (mode === 'smooth') {
     const p0 = V((K[i - 2] || a).p), p1 = V(a.p), p2 = V(b.p), p3 = V((K[i + 1] || b).p);
-    const f2 = f * f, f3 = f2 * f;
-    p = p1.clone().multiplyScalar(2).add(p2.clone().sub(p0).multiplyScalar(f))
+    const f2 = f0 * f0, f3 = f2 * f0;
+    p = p1.clone().multiplyScalar(2).add(p2.clone().sub(p0).multiplyScalar(f0))
       .add(p0.clone().multiplyScalar(2).sub(p1.clone().multiplyScalar(5)).add(p2.clone().multiplyScalar(4)).sub(p3).multiplyScalar(f2))
       .add(p1.clone().multiplyScalar(3).sub(p0).sub(p2.clone().multiplyScalar(3)).add(p3).multiplyScalar(f3)).multiplyScalar(0.5);
-    if (b.t - a.t > 120) f = f * f * (3 - 2 * f);   // entre claves separadas, giro suave (las grabadas del movil van densas)
-  }
+    fr = b.t - a.t > 120 ? f0 * f0 * (3 - 2 * f0) : f0;   // entre claves separadas, giro suave (las del movil van densas)
+  } else p = V(a.p).lerp(V(b.p), f);
   _qa.set(...a.q); _qb.set(...b.q);
-  return { p, q: _qa.clone().slerp(_qb, f), fov: a.fov + (b.fov - a.fov) * f, u };
+  return { p, q: _qa.clone().slerp(_qb, fr), fov: a.fov + (b.fov - a.fov) * fr, u };
 }
 
 // pose en el mundo (para el monitor)

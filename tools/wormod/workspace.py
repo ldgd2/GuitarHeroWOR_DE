@@ -70,6 +70,14 @@ class Workspace:
         out = []
         if not (self.assets / "data").is_dir():
             out.append(f"No se encuentra el juego extraido en {self.assets}")
+        if not self.keys.exists():   # se saca sola del default.xex de tu copia
+            try:
+                import sys
+                sys.path.insert(0, str(TOOLS / "wtde2wor"))
+                from extract_keys import ensure
+                ensure(self.keys, self.assets / "default.xex")
+            except Exception:  # noqa: BLE001
+                pass
         if not self.keys.exists():
             out.append(f"Falta la tabla de claves de audio ({self.keys}); el audio de las canciones no se "
                        "podra convertir")

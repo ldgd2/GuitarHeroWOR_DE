@@ -28,6 +28,8 @@ import { Transport } from './ui/components/Transport.jsx';
 import { ViewTools } from './ui/components/ViewTools.jsx';
 import { Overlays } from './ui/components/Overlays.jsx';
 import { Timeline } from './ui/timeline/Timeline.jsx';
+import { KfDock, KfSide } from './keyframes/KeyframeEditor.jsx';
+import './css/keyframes.css';
 import './viewport/props.js';
 import { on } from './core/state.js';
 import { VIEW } from './core/view.js';
@@ -35,6 +37,9 @@ import { VIEW } from './core/view.js';
 S.venues = [];
 mount('ui-top', TopBar); mount('ui-panel', Panel); mount('ui-transport', Transport);
 mount('ui-viewtools', ViewTools); mount('ui-overlays', Overlays); mount('ui-timeline', Timeline);
+mount('ui-kfdock', KfDock); mount('ui-kfside', KfSide);
+// pruebas automaticas sin ventana (?debug): acceso al estado y a las acciones principales
+if (new URLSearchParams(location.search).has('debug')) import('./keyframes/kf.js').then(kf => { window.__ES = { S, openSong, kf }; });
 start();
 
 // vista 3D ampliada: oculta el monitor y estira la vista principal

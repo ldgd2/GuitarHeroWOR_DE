@@ -7,7 +7,7 @@ import { firstTrack, shotTrack, tracksOf } from '../../timeline/layout.js';
 import { deleteSel, shotOf, snapT } from '../../timeline/edit.js';
 import { seek } from '../playback.js';
 import { Card, Check, edit, Field, Note, Select, Slider } from '../components/fields.jsx';
-import { KeyEditor, toKeys } from './KeyEditor.jsx';
+import { kfOpen } from '../../keyframes/kf.js';
 import { addFx } from './FxPanel.jsx';
 import { VCAM, vcamArm, vcamConnect, vcamLive } from '../../vcam/vcam.js';
 
@@ -66,15 +66,14 @@ function RolePick() {
 
 export function ShotEditor({ sel }) {
   const s = shotOf(sel); if (!s) return null;
-  if (S.keyEdit === s.id) return <KeyEditor s={s} onDone={() => { S.keyEdit = null; S.keySel = null; emit('inspector'); }} />;
   const P = s.p, set = k => v => { P[k] = v; };
   const pr = PRESETS[s.preset] || PRESETS.fija;
   const setFraming = edit(f => { const F = FRAMINGS[f]; s.framing = f; Object.assign(P, { dist: F.dist, fov: F.fov, height: F.height }); });
   return (<div className="fade shotEd">
     <header className="shotHead" style={{ '--c': ROLE_COLOR[s.role] }}>
       <b className="big">{pr.icon}</b><div><h3>Toma {s.id} · {pr.label}</h3><p className="muted small">{pr.desc}</p></div></header>
-    <div className="row"><button className="primary" onClick={edit(() => { toKeys(s); S.keyEdit = s.id; S.keySel = null; })}
-      title="Oculta estos controles y deja solo la linea de tiempo de la toma con sus keyframes">✎ Editar animacion (keyframes)</button>
+    <div className="row"><button className="primary" onClick={() => kfOpen(s)}
+      title="Abre el editor de animacion: pistas, curvas e inspector de claves (los cambios se aplican al pulsar Aplicar)">✎ Editar animacion (keyframes)</button>
       {s.preset === 'keys' && <span className="muted small">{s.keys?.length || 0} claves</span>}</div>
     <Field label="Movimiento"><Select value={s.preset} options={Object.entries(PRESETS).map(([k, v]) => [k, v.icon + '  ' + v.label])}
       onChange={edit(v => { s.preset = v; })} /></Field>

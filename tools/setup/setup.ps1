@@ -57,13 +57,15 @@ function Version($cmd, $argsList) {
     if ($m.Success) { return [version]("{0}.{1}.{2}" -f $m.Groups[1].Value, $m.Groups[2].Value, ($(if ($m.Groups[4].Value) { $m.Groups[4].Value } else { "0" }))) }
     return $null
 }
-function Winget($id, $extra) {
+function InstalarPaquete($id, $extra) {
     if ($SinInstalar) { Aviso "Falta $id (no se instala por -SinInstalar)"; return }
-    if (-not (Existe "winget")) { Falla "No esta winget (Instalador de aplicaciones). Instalalo desde Microsoft Store y vuelve a ejecutar setup.bat." }
+    # winget.exe explicito: un nombre sin extension podria resolver a una funcion de este script
+    $wg = Get-Command "winget.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $wg) { Falla "No esta winget (Instalador de aplicaciones). Instalalo desde Microsoft Store y vuelve a ejecutar setup.bat." }
     Info "Instalando $id ..."
     $a = @("install", "--id", $id, "-e", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity")
     if ($extra) { $a += $extra } else { $a += "--silent" }
-    & winget @a
+    & $wg.Source @a
     if ($LASTEXITCODE -ne 0) { Info "(winget termino con codigo $LASTEXITCODE; se comprueba igualmente)" }
     RecargarPath
 }
@@ -95,7 +97,7 @@ Write-Host "Repositorio: $Root"
 Paso "1/5 Herramientas"
 RecargarPath
 
-if (-not (Existe "git")) { Winget "Git.Git" }
+if (-not (Existe "git")) { InstalarPaquete "Git.Git" }
 if (-not (Existe "git")) { Falla "No se pudo instalar Git." }
 Ok "Git $(Version git @('--version'))"
 
@@ -103,26 +105,26 @@ Ok "Git $(Version git @('--version'))"
 $pyOk = $false
 try { $pyOk = ((& python -c "import sys;print(sys.version_info>=(3,11))" 2>$null) -eq "True") } catch {}
 if (-not $pyOk) {
-    Winget "Python.Python.3.14" @("--silent", "--override", "/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1")
+    InstalarPaquete "Python.Python.3.14" @("--silent", "--override", "/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1")
     try { $pyOk = ((& python -c "import sys;print(sys.version_info>=(3,11))" 2>$null) -eq "True") } catch {}
 }
 if (-not $pyOk) { Falla "Python 3.11+ no responde. Si se acaba de instalar, cierra esta ventana y vuelve a ejecutar setup.bat. Si sigue fallando, desactiva 'python.exe' en Configuracion > Aplicaciones > Alias de ejecucion de aplicaciones." }
 Ok "Python $(Version python @('--version'))"
 
 $nv = $null; if (Existe "node") { $nv = Version node @("--version") }
-if (-not $nv -or $nv -lt [version]"18.0.0") { Winget "OpenJS.NodeJS.LTS"; $nv = Version node @("--version") }
+if (-not $nv -or $nv -lt [version]"18.0.0") { InstalarPaquete "OpenJS.NodeJS.LTS"; $nv = Version node @("--version") }
 if (-not $nv) { Falla "No se pudo instalar Node.js." }
 Ok "Node.js $nv"
 
 $cv = $null; if (Existe "cmake") { $cv = Version cmake @("--version") }
-if (-not $cv -or $cv -lt [version]"3.25.0") { Winget "Kitware.CMake"; $cv = Version cmake @("--version") }
+if (-not $cv -or $cv -lt [version]"3.25.0") { InstalarPaquete "Kitware.CMake"; $cv = Version cmake @("--version") }
 if (-not $cv) { Falla "No se pudo instalar CMake." }
 Ok "CMake $cv"
 
 # Clang: CMakePresets.json lo busca en C:\Program Files\LLVM (donde lo deja el instalador oficial)
 $clang = "C:\Program Files\LLVM\bin\clang.exe"
 $lv = $null; if (Test-Path $clang) { $lv = Version $clang @("--version") }
-if (-not $lv -or $lv -lt [version]"20.0.0") { Winget "LLVM.LLVM"; if (Test-Path $clang) { $lv = Version $clang @("--version") } }
+if (-not $lv -or $lv -lt [version]"20.0.0") { InstalarPaquete "LLVM.LLVM"; if (Test-Path $clang) { $lv = Version $clang @("--version") } }
 if (-not $lv) { Falla "No se pudo instalar LLVM/Clang en C:\Program Files\LLVM." }
 Ok "Clang $lv"
 
@@ -135,7 +137,7 @@ function VsPath {
 }
 if (-not (VsPath)) {
     Info "Visual Studio Build Tools tarda (varios GB). Windows pedira permiso de administrador."
-    Winget "Microsoft.VisualStudio.2022.BuildTools" @("--override", "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --add Microsoft.VisualStudio.Component.Windows11SDK.26100")
+    InstalarPaquete "Microsoft.VisualStudio.2022.BuildTools" @("--override", "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --add Microsoft.VisualStudio.Component.Windows11SDK.26100")
 }
 $vs = VsPath
 if (-not $vs) { Falla "Falta Visual Studio 2022 con 'Desarrollo para el escritorio con C++'. Instalalo desde el Visual Studio Installer y vuelve a ejecutar setup.bat." }
@@ -205,7 +207,14 @@ if (-not (Test-Path $xex) -and $Iso) {
     Info "Extrayendo $Iso en re-wor\assets (unos minutos)..."
     Run "Extraer la ISO" { & $xiso.FullName -x $Iso -d $Assets }
 }
-if (Test-Path $xex) { Ok "re-wor\assets\default.xex" }
+if (Test-Path $xex) {
+    Ok "re-wor\assets\default.xex"
+    # tabla de claves de audio (para convertir y escuchar canciones): esta fija dentro del xex
+    if (-not (Test-Path (Join-Path $Root "re-wor\mods\_cache\wor_fsb_keys.bin"))) {
+        Run "Sacar la tabla de claves de audio" { python (Join-Path $Root "tools\wtde2wor\extract_keys.py") }
+    }
+    Ok "Tabla de claves de audio"
+}
 else { Aviso "Faltan los archivos del juego. Extrae tu ISO de Xbox 360 en re-wor\assets (o ejecuta: setup.bat -Iso ""ruta\a\tu.iso"") y vuelve a ejecutar setup.bat." }
 
 # ---- 5. compilar re-wor ------------------------------------------------------------------------------------------------
@@ -238,7 +247,7 @@ if ($ConMovil) {
         RecargarPath
     }
     if (-not (Test-Path "$env:LOCALAPPDATA\Android\Sdk")) {
-        Winget "Google.AndroidStudio"
+        InstalarPaquete "Google.AndroidStudio"
         Aviso "Abre Android Studio una vez para que descargue el Android SDK; luego ejecuta 'flutter doctor --android-licenses' y vuelve a ejecutar setup.bat -ConMovil."
     } else {
         Push-Location (Join-Path $Root "EditorSong\vcam_app")

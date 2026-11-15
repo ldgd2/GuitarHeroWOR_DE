@@ -658,36 +658,66 @@ bool CamLooksValid(const uint8_t* r) {
   return std::isfinite(lf) && std::fabs(lf - 1) < 0.1f && std::fabs(lu - 1) < 0.1f && std::isfinite(px) && std::fabs(px) < 1e5f &&
          h > 0.05f && h < 175.f;
 }
-bool ReadCamRaw(const uint8_t* base, uint32_t& cam_out, uint8_t raw[96]) {
-  static constexpr uint32_t kIds[2] = {0x071F4183u /* bg_viewport */, 0u};
-  static int logged = 0;
+// Recorre la lista de viewports igual que el motor (sub_823E8568: activo = bit 0x10 de vp+104 a CERO) y se queda con
+// la camara 3D: primero bg_viewport (el escenario de las canciones), luego el principal (id 0, el que usa
+// GetViewportCameraPos sin parametros) y si no, cualquier otro activo con una pose valida. La primera vez (y cuando
+// cambia la eleccion) escribe en el registro lo que ve en cada viewport, para poder diagnosticar.
+struct VpCand { uint32_t id, vp, flags, cam; bool valid; float p[3], hfov, lf, lu; };
+// lectura protegida (funcion aparte: __try no admite objetos con destructor)
+int ScanViewports(const uint8_t* base, VpCand* c) {
+  int n = 0;
   __try {
     const uint32_t head = 0x82860320;
-    for (uint32_t want : kIds) {
-      uint32_t node = Be32(base + head + 4);
-      for (int i = 0; i < 32 && node != head && GuestPtr(node); ++i, node = Be32(base + node + 4)) {
-        if (Be32(base + node + 864) != want) continue;
-        const uint32_t vp = Be32(base + node + 16);
-        if (!GuestPtr(vp)) continue;
-        const uint32_t cam = Be32(base + vp + 116);
-        if (!GuestPtr(cam)) continue;
-        uint8_t r[96];
-        std::memcpy(r, base + cam + 112, 96);
-        if (!CamLooksValid(r)) continue;
-        std::memcpy(raw, r, 96);
-        static uint32_t last = 0;
-        if (last != cam && logged < 6) {
-          last = cam;
-          ++logged;
-          TRACE("[EDFX] camara del escenario: viewport " << std::hex << want << " camara @" << cam << std::dec);
-        }
-        cam_out = cam;
-        return true;
-      }
+    uint32_t node = Be32(base + head + 4);
+    for (int i = 0; i < 24 && node != head && GuestPtr(node); ++i, node = Be32(base + node + 4)) {
+      VpCand& k = c[n++];
+      k = {};
+      k.id = Be32(base + node + 864);
+      k.vp = Be32(base + node + 16);
+      if (!GuestPtr(k.vp)) continue;
+      k.flags = Be32(base + k.vp + 104);
+      k.cam = Be32(base + k.vp + 116);
+      if (!GuestPtr(k.cam)) continue;
+      const uint8_t* r = base + k.cam + 112;
+      for (int j = 0; j < 3; ++j) k.p[j] = BeF(r + 4 * j);
+      k.hfov = BeF(r + 80);
+      auto len = [&](int off) { float s2 = 0; for (int j = 0; j < 3; ++j) { const float v = BeF(r + off + 4 * j); s2 += v * v; } return std::sqrt(s2); };
+      k.lf = len(48); k.lu = len(32);
+      k.valid = CamLooksValid(r);
     }
   } __except (1) {
   }
-  return false;
+  return n;
+}
+bool CopyCamRaw(const uint8_t* base, uint32_t cam, uint8_t raw[96]) {
+  __try { std::memcpy(raw, base + cam + 112, 96); return true; } __except (1) { return false; }
+}
+bool ReadCamRaw(const uint8_t* base, uint32_t& cam_out, uint8_t raw[96]) {
+  VpCand c[24];
+  const int n = ScanViewports(base, c);
+  int pick = -1;
+  auto active = [&](const VpCand& k) { return k.valid && (k.flags & 0x10) == 0; };
+  for (uint32_t want : {0x071F4183u, 0u})
+    for (int i = 0; i < n && pick < 0; ++i) if (c[i].id == want && active(c[i])) pick = i;
+  for (int i = 0; i < n && pick < 0; ++i) if (active(c[i])) pick = i;
+
+  static uint32_t last_cam = 1; static int dumps = 0;
+  const uint32_t now_cam = pick >= 0 ? c[pick].cam : 0;
+  if (now_cam != last_cam && dumps < 8) {
+    last_cam = now_cam; ++dumps;
+    std::ostringstream o;
+    o << "[EDFX] viewports (" << n << "):";
+    for (int i = 0; i < n; ++i)
+      o << " [id " << std::hex << c[i].id << " vp " << c[i].vp << " flags " << c[i].flags << " cam " << c[i].cam << std::dec
+        << " pos (" << c[i].p[0] << "," << c[i].p[1] << "," << c[i].p[2] << ") |F|=" << c[i].lf << " |U|=" << c[i].lu
+        << " hfov=" << c[i].hfov << (c[i].valid ? " valida" : " NO valida") << (i == pick ? " <- ELEGIDA" : "") << "]";
+    if (pick < 0) o << "  -> ninguna camara 3D valida: las tomas y efectos de camara no se aplican";
+    TRACE(o.str());
+  }
+  if (pick < 0) return false;
+  if (!CopyCamRaw(base, c[pick].cam, raw)) return false;
+  cam_out = c[pick].cam;
+  return true;
 }
 
 // Escritura protegida de la camara (funcion aparte: __try no admite objetos con destructor)

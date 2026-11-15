@@ -273,3 +273,25 @@ Todo en `re-wor/src/de/native_fx.cpp` (frame logico del juego) + camara en `edfx
   - El telefono ve el monitor (JPEG a 4-30 fps).
   - Al GRABAR, la toma elegida pasa a keyframes, la cancion suena desde su inicio y se guardan 30 claves/s hasta su
     final. Logica en `web/src/vcam/vcam.js`.
+
+## Editor de animacion (keyframes) aislado y camara del movil con posicion real
+
+- **Editor de animacion** (`web/src/keyframes/`):
+  - Se abre con "Editar animacion" en una toma. Ocupa la linea de tiempo y el panel:
+    - vista 3D para encuadrar, con la trayectoria y las claves dibujadas;
+    - monitor con el resultado;
+    - pistas (Camara / Posicion / Rotacion / FOV) o curvas por canal;
+    - inspector numerico de la clave elegida.
+  - Trabaja sobre una COPIA de la toma (`KF.doc`), con deshacer, portapapeles y atajos propios. El proyecto no se
+    toca hasta "Aplicar", que deja un solo paso de deshacer; "Cancelar" lo deja todo igual.
+  - Cada clave tiene su interpolacion hacia la siguiente (`key.ease`: curva, lineal, acelerar/frenar, mantener).
+    `camera/shots.js` -> `keyPose` la usa, asi que el monitor, el .ska y el .edfx salen iguales.
+  - Pilotar (P): mover la vista 3D mueve la clave en directo.
+  - Simplificar: quita las claves que sobran de una grabacion del movil sin desviarse mas de 1 cm / 0,4 grados.
+  - Si el movil graba con el editor abierto, graba en la copia (`VCAM_HOOKS` en `vcam/vcam.js`).
+- **App del movil:**
+  - ARCore (`android/.../MainActivity.kt`) da la posicion REAL del telefono en metros: caminar, agacharse o subir mueve
+    la camara. Sin ARCore se usa el giroscopio.
+  - Escala del movimiento, estabilizador, guias de tercios, zoom vertical y "Soltar" para recolocarse.
+- **Juego:** `ReadCamRaw` (`re-wor/src/de/edfx.cpp`) recorre todos los viewports activos con el mismo criterio que el
+  motor (`sub_823E8568`). Escribe en `re_wor_trace.log` una linea `[EDFX] viewports (...)` con cada camara y cual eligio.

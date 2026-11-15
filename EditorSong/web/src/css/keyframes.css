@@ -1,0 +1,70 @@
+/* Editor de animacion de camara (keyframes): ocupa la zona de la linea de tiempo y la del panel mientras esta abierto. */
+#ui-kfside, #ui-kfdock { display: none; }
+body.kfMode #layout { grid-template-columns: 1fr 1fr 340px; }
+body.kfMode.maxView #layout { grid-template-columns: 1fr 0 340px; }
+body.kfMode #ui-panel, body.kfMode #tlWrap { display: none; }
+body.kfMode #ui-kfside { display: block; grid-column: 3; grid-row: 1; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; min-height: 0; }
+body.kfMode #ui-kfdock { display: flex; grid-column: 1 / span 3; grid-row: 2; border-top: 2px solid #ffd34d55; min-width: 0; min-height: 0; background: var(--panel); }
+body.kfMode #monWrap { border-left: 1px solid var(--line); }
+body.kfMode #monWrap::after { content: 'ANIMACION'; position: absolute; right: 10px; top: 10px; font: 600 10px/1 system-ui; letter-spacing: .12em;
+  color: #1d1304; background: #ffd34d; padding: 4px 7px; border-radius: 4px; }
+
+.kfDock { display: flex; flex-direction: column; width: 100%; min-height: 0; }
+.kfBar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: nowrap; overflow-x: auto; background: var(--panel2); }
+.kfBar button, .kfBar select { padding: 3px 7px; }
+.kfTitle { color: #ffd34d; margin-right: 2px; flex: none; }
+.kfGroup { display: flex; align-items: center; gap: 3px; padding-right: 6px; flex: none; border-right: 1px solid var(--line); }
+.kfGroup:last-of-type { border-right: 0; }
+.kfBar button.on, .kfSide button.on, .kfRows button.on { background: #ffd34d22; border-color: #ffd34d; color: #ffd34d; }
+.kfPlay { min-width: 36px; justify-content: center; }
+.kfTc { font: 600 12px/1 ui-monospace, Consolas, monospace; color: var(--muted); min-width: 112px; padding-left: 6px; }
+.kfSpacer { flex: 1; }
+
+.kfBody { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; user-select: none; }
+.kfRuler, .kfRow { display: flex; }
+.kfLbl { width: 132px; flex: none; padding: 6px 10px; border-right: 1px solid var(--line); font-weight: 600; display: flex; flex-direction: column; gap: 3px; background: var(--panel2); }
+.kfLbl small { font-weight: 400; color: var(--muted); }
+.kfLane { position: relative; flex: 1; min-width: 0; overflow: hidden; cursor: crosshair; }
+.kfRuler { height: 26px; border-bottom: 1px solid var(--line); background: #12141a; }
+.kfRuler .kfLbl { font: 600 11px/14px ui-monospace, Consolas, monospace; color: var(--muted); }
+.kfRuler .kfLane { cursor: ew-resize; }
+.kfTick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--line2); padding: 3px 4px; font: 10px/1 ui-monospace, Consolas, monospace; color: var(--muted); }
+.kfBeat { position: absolute; bottom: 0; height: 8px; border-left: 1px solid #ffd34d55; }
+.kfRows { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.kfRow { flex: 1; min-height: 34px; border-bottom: 1px solid var(--line); }
+.kfRow.all { background: #ffd34d0a; }
+.kfRow:nth-child(even) .kfLane { background: #ffffff04; }
+.kfSpark { position: absolute; inset: 4px 0; width: 100%; height: calc(100% - 8px); pointer-events: none; }
+.kfKey { position: absolute; top: 50%; width: 13px; height: 13px; margin: -7px 0 0 -7px; transform: rotate(45deg); cursor: grab;
+  background: #ffd34d; border: 1px solid #1d1304; box-shadow: 0 0 0 1px #ffd34d44; z-index: 2; }
+.kfKey.e-linear { background: #ffe9a6; }
+.kfKey.e-hold { border-radius: 0; background: #ff9d4d; transform: none; }
+.kfKey.e-easeIn, .kfKey.e-easeOut, .kfKey.e-easeInOut { border-radius: 50% 0; }
+.kfKey.on { background: #ff5ad1; box-shadow: 0 0 0 3px #ff5ad155; z-index: 3; }
+.kfRow:not(.all) .kfKey { width: 9px; height: 9px; margin: -5px 0 0 -5px; opacity: .8; }
+.kfHead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #ff4d4d; pointer-events: none; z-index: 5; box-shadow: 0 0 6px #ff4d4d; }
+.kfBox { position: absolute; top: 0; bottom: 0; background: #5aa9ff22; border: 1px solid #5aa9ff; pointer-events: none; }
+.kfRows.curves .curveRow { flex: 1; }
+.kfRows.curves .kfLbl button { margin-bottom: 2px; }
+.kfGraph { position: absolute; inset: 6px 0; width: 100%; height: calc(100% - 12px); pointer-events: none; }
+.kfPt { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--c); border: 2px solid #0f1116; cursor: grab; z-index: 2; }
+.kfPt.on { box-shadow: 0 0 0 3px #ff5ad1; }
+.kfHint { padding: 4px 10px; border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.kfSide { padding: 12px 14px; }
+.kfSide h3 { margin: 0 0 10px; color: #ffd34d; }
+.kfSide h4 { margin: 14px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.kfGrid { display: grid; grid-template-columns: 120px 1fr; gap: 6px 8px; align-items: center; }
+.kfIn { display: flex; align-items: center; gap: 6px; }
+.kfIn input[type=number] { width: 100%; min-width: 0; border-left: 3px solid var(--c, var(--line)); }
+.kfIn input[type=range] { flex: 1; }
+.kfIn b { font-size: 10px; color: var(--c); width: 30px; flex: none; }
+.kfIn em { color: var(--muted); font-style: normal; }
+.kfVec { display: grid; grid-template-columns: 1fr; gap: 5px; }
+.kfBtns { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.kfBtns.row { flex-direction: row; margin: 0; }
+.kfPhone { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--line); }
+/* muchas claves juntas (grabacion del movil): marcas pequenas para que se vea la curva */
+.kfRows.dense .kfKey { width: 5px; height: 12px; margin: -6px 0 0 -2px; transform: none; border: 0; box-shadow: none; border-radius: 1px; opacity: .55; }
+.kfRows.dense .kfKey.on { opacity: 1; }
+.kfRows.dense .kfPt { width: 4px; height: 4px; margin: -2px 0 0 -2px; border: 0; opacity: .7; }

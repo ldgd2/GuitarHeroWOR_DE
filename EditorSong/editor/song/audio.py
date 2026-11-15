@@ -55,6 +55,9 @@ def _fsb(path: Path) -> bytes:
     from fsb_crypto import load_key_table, wor_decrypt, wt_decrypt_file
     data = path.read_bytes()
     table = paths.MODS / "_cache" / "wor_fsb_keys.bin"
+    if not table.exists():   # se saca sola del default.xex de tu copia
+        from extract_keys import ensure
+        ensure(table)
     if table.exists():
         try:
             return wor_decrypt(data, load_key_table(str(table)))[0]
