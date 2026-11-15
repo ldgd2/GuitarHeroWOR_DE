@@ -1,8 +1,74 @@
-/song
-/re-wor/thirdparty/rexglue-sdk
-/tools/ghsdk
+# =====================================================================================================
+#  GuitarHeroWOR_DE - que NO se sube al repositorio
+#  Regla: solo codigo fuente, scripts y configuracion. Nada del juego, nada personal, nada generado.
+#  Lo que falta en un PC nuevo lo pone setup.bat (dependencias, SDKs, compilacion).
+# =====================================================================================================
+
+# ---- Datos del juego y del jugador (de TU copia: nunca se publican) ---------------------------------
+/re-wor/assets/*
+!/re-wor/assets/.gitignore
+/re-wor/user/
+/re-wor/mods/*
 /mods/*
-EditorSong/cache/
-EditorSong/backups/
-EditorSong/projects/
+/song/
+*.iso
+*.xex
+*.pak.xen
+*.pab.xen
+*.fsb.xen
+wor_fsb_keys.bin
+
+# ---- SDKs y repositorios de terceros (los descarga setup.bat) ----------------------------------------
+# rexglue-sdk se clona en la version fijada y se le aplican los cambios de re-wor/patches/rexglue-sdk/
+/re-wor/thirdparty/
+/tools/ghsdk/
+/tools/_bin/
+
+# ---- Salidas de compilacion y codigo generado ---------------------------------------------------------
+/re-wor/out/
+/re-wor/build/
+/re-wor/generated/
+/re-wor/cache/
+CMakeUserPresets.json
+*.obj
+*.o
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.exe
+*.dll
+
+# ---- EditorSong: caches, copias de seguridad y proyectos locales -------------------------------------
+/EditorSong/cache/
+/EditorSong/backups/
+/EditorSong/projects/
+/EditorSong/web/dist/
+
+# ---- Dependencias instaladas --------------------------------------------------------------------------
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- Registros, volcados y temporales -----------------------------------------------------------------
+*.log
+crashdumps/
+*.dmp
+*.tmp
+*.bak
+nul
+
+# ---- Editores, IA y sistema ---------------------------------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.user
 .claude/
+.sisyphus/
+opencode.json
+oh-my-opencode.json
+Thumbs.db
+desktop.ini
+.DS_Store

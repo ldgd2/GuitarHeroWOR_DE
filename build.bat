@@ -1,5 +1,5 @@
 @echo off
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+call "%~dp0tools\setup\vsenv.bat" || goto on_error
 
 cd /d "%~dp0re-wor"
 
