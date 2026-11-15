@@ -19,7 +19,17 @@ def _time_of(ev: QbStruct) -> int:
     return ev.get(qbkey("time"), 0) or 0
 
 
-def _write_qbs(ents, name: str, events, clips, notes) -> None:
+def _write_qbs(ents, name: str, events, clips, notes, facial=None) -> None:
+    fkey = qbkey(f"{name}_facial")
+    facial_val = (QbArray("struct", facial) if facial else QbArray("empty", [])) if facial is not None else None
+    has_facial = False
+    for e in ents:
+        if e.type != EXT_QB or facial_val is None:
+            continue
+        try:
+            has_facial |= QbFile(e.data).find(fkey) is not None
+        except Exception:  # noqa: BLE001
+            pass
     for e in ents:
         if e.type != EXT_QB:
             continue
@@ -31,12 +41,19 @@ def _write_qbs(ents, name: str, events, clips, notes) -> None:
         # definiciones de clip en el .qb de scriptevents.
         is_events = q.find(qbkey(f"{name}_scriptevents")) is not None
         touched = is_events
+        if facial_val is not None and not has_facial and is_events:
+            # la cancion no tenia array de caras: va junto a los eventos
+            q.items.append(QbItem("array", fkey, facial_val))
+            has_facial = True
         items = []
         for it in q.items:
             if is_events and isinstance(it.value, QbStruct) and isinstance(it.value.get(qbkey("characters")), QbArray):
                 continue  # las definiciones de clip se reescriben todas en el .qb de eventos
             if it.name == qbkey(f"{name}_scriptevents"):
                 it.value = QbArray("struct", events) if events else QbArray("empty", [])
+            if it.name == fkey and facial_val is not None:
+                it.value = facial_val
+                touched = True
             for k in NOTE_TRACKS:
                 if it.name == qbkey(f"{name}_{k}"):
                     vals = encode_notes(notes.get(k, []))
@@ -50,10 +67,14 @@ def _write_qbs(ents, name: str, events, clips, notes) -> None:
             e.data = q.build()
 
 
-def _add_imported_skas(ents, clips, name: str) -> list[str]:
+def _add_imported_skas(ents, clips, name: str, facial=()) -> list[str]:
     have = {e.fullname: e for e in ents}
     ctx = ents[0].ctx if ents else qbkey(name)
     used = set()
+    for ev in facial:   # animaciones de cara (Band_PlayFacialAnim)
+        par = ev.get(qbkey("params"))
+        if isinstance(par, QbStruct) and isinstance(par.get(qbkey("anim")), int):
+            used.add(par.get(qbkey("anim")))
     for st in clips.values():
         for key in ("characters", "cameras"):
             arr = st.get(qbkey(key))
@@ -94,13 +115,16 @@ def build(proj: dict) -> dict:
     ents, last, first, compressed = load_pak(p)
     events = sorted((struct_from_json(e) for e in proj["events"]), key=_time_of)
     clips = {int(k, 16): struct_from_json(v) for k, v in proj["clips"].items()}
-    _write_qbs(ents, name, events, clips, proj["notes"])
+    facial = [struct_from_json(e) for e in proj["facial"]] if "facial" in proj else None
+    if facial is not None:
+        facial.sort(key=_time_of)
+    _write_qbs(ents, name, events, clips, proj["notes"], facial)
 
     from wor_song import rebuild_perf_lists
     for e in ents:
         if e.fullname == qbkey(f"songs{BS}{name}.perf"):
             e.data = rebuild_perf_lists(perf_write(e.data, proj["cameras"]), events)
-    added = _add_imported_skas(ents, clips, name)
+    added = _add_imported_skas(ents, clips, name, facial or ())
 
     data = write_pak(ents, header_area=first, last=last)
     if compressed:

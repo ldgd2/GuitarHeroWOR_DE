@@ -44,6 +44,10 @@ CMakeUserPresets.json
 /EditorSong/backups/
 /EditorSong/projects/
 /EditorSong/web/dist/
+/EditorSong/vcam_app/android/build/
+/EditorSong/vcam_app/build/
+.gradle/
+**/android/build/
 
 # ---- Dependencias instaladas --------------------------------------------------------------------------
 node_modules/
@@ -72,3 +76,11 @@ oh-my-opencode.json
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# copias de la partida guardada
+re-wor/user_backup_*/
+
+# configuracion local de cada PC (rutas absolutas de esa maquina; el juego y wormod la regeneran)
+re-wor/Guitar Hero Warriors of Rock.toml
+tools/wormod/settings.json
+/re-wor/dev_bridge.json

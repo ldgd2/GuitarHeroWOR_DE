@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:vcam_app/main.dart';
+import 'package:vcam_app/core/quat.dart';
 
 void main() {
   test('girar 90 grados en Y lleva -Z a -X', () {

@@ -12,7 +12,10 @@
 #include "de/de_config.hpp"
 #include "de/de_hooks.hpp"
 #include "de/de_panel.hpp"
+#include "de/qb_bridge.hpp"
+#include "de/gfx_options.hpp"
 #include "de/edfx.hpp"
+#include "de/render_sandbox.hpp"
 #include "diagnostics/stubs.hpp"
 #include "generated/re_wor_init.h"
 #include "generated/re_wor_pch.h"
@@ -21,6 +24,7 @@
 #include <rex/input/input_system.h>
 #include <rex/ui/keybinds.h>
 #include <rex/cvar.h>
+#include <rex/system/xmemory.h>
 #include <rex/filesystem.h>
 #include <rex/chrono/clock.h>
 
@@ -121,6 +125,29 @@ void ReWorApp::OnPreSetup(rex::RuntimeConfig& config) {
     config.gpu_plugin = "xenos";
     TRACE("[ReWorApp::OnPreSetup] gpu_plugin vacio -> usando 'xenos'");
   }
+
+  // Optimizaciones de traduccion grafica para PC (Direct3D 12 - Hardware RTV & Cache):
+  // RTV es el camino mas rapido y compatible para Nvidia, AMD e Intel (evita el costo de ROV).
+  const auto& gfx = re_wor::de::Get().graphics;
+  if (!gfx.render_target_path.empty()) {
+    rex::cvar::SetFlagByName("render_target_path_d3d12", gfx.render_target_path);
+  } else {
+    rex::cvar::SetFlagByName("render_target_path_d3d12", "rtv");
+  }
+  if (gfx.resolution_scale > 0) {
+    rex::cvar::SetFlagByName("draw_resolution_scale_x", std::to_string(gfx.resolution_scale));
+    rex::cvar::SetFlagByName("draw_resolution_scale_y", std::to_string(gfx.resolution_scale));
+  }
+  int cache_mb = gfx.texture_cache_mb > 0 ? gfx.texture_cache_mb : 1024;
+  rex::cvar::SetFlagByName("texture_cache_memory_limit_soft", std::to_string(cache_mb));
+  rex::cvar::SetFlagByName("texture_cache_memory_limit_hard", std::to_string(cache_mb * 2));
+  if (gfx.async_pipeline_compile) {
+    rex::cvar::SetFlagByName("d3d12_pipeline_creation_threads", "-1");
+  }
+  // Opciones graficas del panel (pestana Graficos): todas son de arranque en el SDK
+  re_wor::de::ApplyDisplayOptions(gfx);
+  rex::cvar::SetFlagByName("d3d12_readback_resolve", "false");
+  rex::cvar::SetFlagByName("d3d12_submit_on_primary_buffer_end", "true");
 }
 
 void ReWorApp::OnPostSetup() {
@@ -239,18 +266,40 @@ void ReWorApp::OnPostSetup() {
   rex::ui::RegisterBind("bind_skip_intro", re_wor::de::HotkeyOr(re_wor::de::Get().hotkeys.skip_intro, "F"),
                         "Saltar intro", []() { re_wor::de::RequestSkipIntro(); });
 
+  // Inicializar estado de DebugBuild y rendimiento desde configuracion
+  re_wor::de::qb_bridge::SetDebugBuild(re_wor::de::Get().dev.debug_build);
+  re_wor::de::qb_bridge::StartServer(re_wor::de::Get().dev.bridge_port);   // puerto local para el editor
+  // memoria del juego para los scripts propios (qb/*.qb.xen); se reserva una vez y no se libera
+  re_wor::de::qb_bridge::SetGuestAllocator([rt = runtime()](uint32_t size) -> uint32_t {
+    return rt && rt->memory() ? rt->memory()->SystemHeapAlloc(size, 0x20) : 0;
+  });
+  // 'vsync' del SDK es el reloj de VBlank del juego (no el del monitor): apagado gira a 1000 Hz y da
+  // tirones, asi que se deja siempre encendido. La frecuencia del juego es [graphics] refresh_hz
+  // (video_mode_refresh_rate, en ApplyDisplayOptions) y el VSync del monitor es [graphics] vsync.
+  rex::cvar::SetFlagByName("vsync", "true");
+
 #ifdef REWOR_DEV
   re_wor::diagnostics::StubTracker::instance().start_reporter(5);
 #endif
+
+  re_wor::de::sandbox::Install();
 
   TRACE("[ReWorApp::OnPostSetup] Setup completed successfully");
 }
 
 void ReWorApp::OnCreateDialogs(rex::ui::ImGuiDrawer* imgui) {
+  re_wor::de::CreateFpsCounter(imgui);   // [graphics] show_fps (Options > Graphics > Show FPS)
   // Panel de la Definitive Edition (controles, mods, musica/skins, dev). Tecla en [hotkeys].panel.
   const auto& hk = re_wor::de::Get().hotkeys;
   rex::ui::RegisterBind("bind_de_panel", re_wor::de::HotkeyOr(hk.panel, "F8"), "Panel Definitive Edition",
                         [this, imgui]() { re_wor::de::DePanelDialog::Toggle(imgui, runtime()); });
+
+  // F6: abre el menu de depuracion original de Neversoft y la pestana Dev del panel
+  rex::ui::RegisterBind("bind_debug_menu", re_wor::de::HotkeyOr(hk.debug_menu, "F6"),
+                        "Menu de depuracion", [this, imgui]() {
+    re_wor::de::qb_bridge::OpenDebugMenu();
+    re_wor::de::DePanelDialog::Toggle(imgui, runtime(), 4);
+  });
   // Capa de efectos del editor de canciones (EDFX): siempre presente, solo dibuja durante las canciones que
   // traen un .edfx. Se borra sola con el drawer.
   new re_wor::de::edfx::EdfxOverlay(imgui);

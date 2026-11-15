@@ -1,8 +1,15 @@
-# Rutas absolutas fijas para evitar cadenas vacías
-$ScriptRoot = "C:\Users\ldgd2\Documents\proyecto_lider\GuitarHeroWOR_DE\re-wor"
-$GameExe    = "$ScriptRoot\out\build\win-amd64-relwithdebinfo\Guitar Hero Warriors of Rock.exe"
-$AssetsDir  = "$ScriptRoot\assets"
-$TraceLog   = "$ScriptRoot\re_wor_trace.log"
+# Rutas relativas a esta carpeta (re-wor); run_game.bat puede pasarlas explicitamente.
+param(
+    [string]$GameExe = "",
+    [string]$AssetsDir = "",
+    [string]$TraceLog = "",
+    [string]$ExtraArgs = ""
+)
+$ScriptRoot = $PSScriptRoot
+if (-not $GameExe)   { $GameExe = "out\build\win-amd64-relwithdebinfo\Guitar Hero Warriors of Rock.exe" }
+if (-not [System.IO.Path]::IsPathRooted($GameExe)) { $GameExe = Join-Path $ScriptRoot $GameExe }
+if (-not $AssetsDir) { $AssetsDir = Join-Path $ScriptRoot "assets" }
+if (-not $TraceLog)  { $TraceLog  = Join-Path $ScriptRoot "re_wor_trace.log" }
 
 # Verificar que el ejecutable exista
 if (-not (Test-Path $GameExe)) {
@@ -21,7 +28,9 @@ Write-Host " Ruta de assets: $AssetsDir"
 Write-Host "========================================================"
 
 $workDir = Split-Path $GameExe
-$proc = Start-Process -FilePath $GameExe -ArgumentList "--game_data_root", "`"$AssetsDir`"" -WorkingDirectory $workDir -PassThru
+$gameArgs = @("--game_data_root", "`"$AssetsDir`"")
+if ($ExtraArgs.Trim()) { $gameArgs += $ExtraArgs.Trim() }
+$proc = Start-Process -FilePath $GameExe -ArgumentList $gameArgs -WorkingDirectory $workDir -PassThru
 
 # Esperar a que se cree el archivo de log
 $timeout = 0

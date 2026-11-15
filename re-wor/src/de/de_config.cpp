@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "de/de_config.hpp"
 
 #include "core/crash_handler.hpp"
@@ -116,6 +117,11 @@ void Load() {
     if (auto dev = tbl["dev"].as_table()) {
       c.dev.log_file_opens = (*dev)["log_file_opens"].value_or(c.dev.log_file_opens);
       c.dev.show_fps = (*dev)["show_fps"].value_or(c.dev.show_fps);
+      c.dev.debug_build = (*dev)["debug_build"].value_or(c.dev.debug_build);
+      c.dev.auto_skip_intro = (*dev)["auto_skip_intro"].value_or(c.dev.auto_skip_intro);
+      c.dev.uncapped_fps = (*dev)["uncapped_fps"].value_or(c.dev.uncapped_fps);
+      c.dev.target_refresh_rate = (*dev)["target_refresh_rate"].value_or(c.dev.target_refresh_rate);
+      c.dev.bridge_port = (*dev)["bridge_port"].value_or(c.dev.bridge_port);
     }
     if (auto hk = tbl["hotkeys"].as_table()) {
       auto rd = [&](const char* k, std::string& v) { v = (*hk)[k].value_or(v); };
@@ -126,11 +132,46 @@ void Load() {
       rd("console", c.hotkeys.console);
       rd("achievements", c.hotkeys.achievements);
       rd("skip_intro", c.hotkeys.skip_intro);
+      rd("debug_menu", c.hotkeys.debug_menu);
     }
     if (auto perf = tbl["performance"].as_table()) {
       c.perf.trace_probes = (*perf)["trace_probes"].value_or(c.perf.trace_probes);
       c.perf.above_normal_priority =
           (*perf)["above_normal_priority"].value_or(c.perf.above_normal_priority);
+    }
+    if (auto gfx = tbl["graphics"].as_table()) {
+      c.graphics.backend = (*gfx)["backend"].value_or(c.graphics.backend);
+      c.graphics.render_target_path =
+          (*gfx)["render_target_path"].value_or(c.graphics.render_target_path);
+      c.graphics.resolution_scale =
+          static_cast<int>((*gfx)["resolution_scale"].value_or(c.graphics.resolution_scale));
+      c.graphics.texture_cache_mb =
+          static_cast<int>((*gfx)["texture_cache_mb"].value_or(c.graphics.texture_cache_mb));
+      c.graphics.async_pipeline_compile =
+          (*gfx)["async_pipeline_compile"].value_or(c.graphics.async_pipeline_compile);
+      auto& g = c.graphics;
+      g.resolution = (*gfx)["resolution"].value_or(g.resolution);
+      g.window_mode = static_cast<int>((*gfx)["window_mode"].value_or(g.window_mode));
+      g.refresh_hz = static_cast<int>((*gfx)["refresh_hz"].value_or(g.refresh_hz));
+      g.upscale = (*gfx)["upscale"].value_or(g.upscale);
+      g.msaa2x = (*gfx)["msaa2x"].value_or(g.msaa2x);
+      g.letterbox = (*gfx)["letterbox"].value_or(g.letterbox);
+      g.vsync = (*gfx)["vsync"].value_or(g.vsync);
+      g.show_fps = (*gfx)["show_fps"].value_or(g.show_fps);
+      auto rf = [&](const char* k, float& v, float lo, float hi) {
+        v = std::clamp(static_cast<float>((*gfx)[k].value_or(static_cast<double>(v))), lo, hi);
+      };
+      rf("sharpness", g.sharpness, 0, 1);
+      rf("bloom", g.bloom, 0, 1);
+      rf("glow", g.glow, 0, 1);
+      rf("brightness", g.brightness, -1, 1);
+      rf("contrast", g.contrast, -1, 1);
+      rf("saturation", g.saturation, -1, 1);
+      rf("vignette", g.vignette, 0, 1);
+      rf("grain", g.grain, 0, 1);
+      rf("blur", g.blur, 0, 1);
+      g.window_mode = std::clamp(g.window_mode, 0, 2);
+      g.refresh_hz = std::clamp(g.refresh_hz, 30, 240);
     }
     TRACE("[DE::Config] Cargado " << path.string());
   } catch (const toml::parse_error& e) {
@@ -170,10 +211,39 @@ bool Save() {
     mods.push_back(toml::table{{"folder", m.folder}, {"enabled", m.enabled}});
   }
 
-  toml::table dev{{"log_file_opens", c.dev.log_file_opens}, {"show_fps", c.dev.show_fps}};
+  toml::table dev{{"log_file_opens", c.dev.log_file_opens},
+                  {"show_fps", c.dev.show_fps},
+                  {"debug_build", c.dev.debug_build},
+                  {"auto_skip_intro", c.dev.auto_skip_intro},
+                  {"uncapped_fps", c.dev.uncapped_fps},
+                  {"target_refresh_rate", c.dev.target_refresh_rate},
+                  {"bridge_port", c.dev.bridge_port}};
 
   toml::table perf{{"trace_probes", c.perf.trace_probes},
                     {"above_normal_priority", c.perf.above_normal_priority}};
+
+  toml::table gfx{{"backend", c.graphics.backend},
+                  {"render_target_path", c.graphics.render_target_path},
+                  {"resolution_scale", c.graphics.resolution_scale},
+                  {"texture_cache_mb", c.graphics.texture_cache_mb},
+                  {"async_pipeline_compile", c.graphics.async_pipeline_compile},
+                  {"resolution", c.graphics.resolution},
+                  {"window_mode", c.graphics.window_mode},
+                  {"refresh_hz", c.graphics.refresh_hz},
+                  {"upscale", c.graphics.upscale},
+                  {"sharpness", static_cast<double>(c.graphics.sharpness)},
+                  {"msaa2x", c.graphics.msaa2x},
+                  {"letterbox", c.graphics.letterbox},
+                  {"vsync", c.graphics.vsync},
+                  {"show_fps", c.graphics.show_fps},
+                  {"bloom", static_cast<double>(c.graphics.bloom)},
+                  {"glow", static_cast<double>(c.graphics.glow)},
+                  {"brightness", static_cast<double>(c.graphics.brightness)},
+                  {"contrast", static_cast<double>(c.graphics.contrast)},
+                  {"saturation", static_cast<double>(c.graphics.saturation)},
+                  {"vignette", static_cast<double>(c.graphics.vignette)},
+                  {"grain", static_cast<double>(c.graphics.grain)},
+                  {"blur", static_cast<double>(c.graphics.blur)}};
 
   toml::table hotkeys{{"panel", c.hotkeys.panel},
                       {"fullscreen", c.hotkeys.fullscreen},
@@ -181,13 +251,15 @@ bool Save() {
                       {"settings", c.hotkeys.settings},
                       {"console", c.hotkeys.console},
                       {"achievements", c.hotkeys.achievements},
-                      {"skip_intro", c.hotkeys.skip_intro}};
+                      {"skip_intro", c.hotkeys.skip_intro},
+                      {"debug_menu", c.hotkeys.debug_menu}};
 
   toml::table root;
   root.insert("performance", std::move(perf));
   root.insert("hotkeys", std::move(hotkeys));
   root.insert("input", std::move(input));
   root.insert("mods", std::move(mods));
+  root.insert("graphics", std::move(gfx));
   root.insert("dev", std::move(dev));
 
   std::ofstream out(ConfigPath(), std::ios::out | std::ios::trunc);

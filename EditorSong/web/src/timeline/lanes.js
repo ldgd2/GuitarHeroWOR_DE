@@ -5,11 +5,11 @@ import { AUTO_OK, clipSlotOf, MOMENT_OK, ROLE_COLOR, ROLE_ES, roleOfKey } from '
 import { cutName } from '../core/cutnames.js';
 import { clipChars, clipDef, clipSpan } from '../song/clips.js';
 import { EFFECTS, PRESETS } from '../camera/presets.js';
-import { lightTrackOf, ownTrack, shotTrack } from './layout.js';
+import { lightTrackOf, ownTrack, poseTrack, shotTrack } from './layout.js';
 
 export const HEAD = 236;           // ancho de la columna de nombres
 export const TRACK_H = { audio: 64, stem: 30, bars: 30, shots: 40, auto: 32, moment: 32, fx: 32, light: 30, clip: 34, loop: 30,
-  events: 28, note: 28, bandmoment: 22, props: 32 };
+  events: 28, note: 28, bandmoment: 22, props: 32, pose: 32 };
 export const GROUP_H = 30, GROUP_GAP = 10;
 export const animName = k => S.animById.get(hx(k)) || 'animacion ' + hx(k).slice(2, 8);
 const pretty = s => s.replace(/^Band_/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -21,21 +21,29 @@ export function trackItems(tr) {
       (P.shots || []).forEach(s => {
         if (shotTrack(s) !== tr.id) return;
         const pr = PRESETS[s.preset];
-        out.push({ t: s.t, len: s.dur, label: `${pr?.icon || ''} ${pr?.label || s.preset} · ${ROLE_ES[s.role]}`, color: ROLE_COLOR[s.role],
+        out.push({ t: s.t, len: s.dur, label: `${pr?.label || s.preset} · ${ROLE_ES[s.role]}`, color: ROLE_COLOR[s.role],
           sel: { type: 'shot', id: s.id }, resize: true, cls: 'shot', uid: 's' + s.id });
       });
       break;
     case 'fx':
       (P.effects || []).forEach(e => {
         if (ownTrack(e, 'fx') !== tr.id) return;
-        out.push({ t: e.t, len: e.dur, label: EFFECTS[e.type]?.label || e.type, color: '#c255b0', sel: { type: 'fx', id: e.id }, resize: true, uid: 'f' + e.id });
+        out.push({ t: e.t, len: e.dur, label: EFFECTS[e.type]?.label || e.type, color: '#8f5ea6', sel: { type: 'fx', id: e.id }, resize: true, uid: 'f' + e.id });
       });
       break;
     case 'props':
       (P.props || []).forEach(p => {
         if (ownTrack(p, 'props') !== tr.id) return;
         const t0 = p.t ?? 0, len = p.dur ?? P.length;
-        out.push({ t: t0, len, label: p.name, color: '#9a7a4a', sel: { type: 'prop', id: p.id }, resize: true, uid: 'p' + p.id });
+        out.push({ t: t0, len, label: p.name, color: '#8c7352', sel: { type: 'prop', id: p.id }, resize: true, uid: 'p' + p.id });
+      });
+      break;
+    case 'pose':
+      (P.poseLayers || []).forEach(L => {
+        if (poseTrack(L) !== tr.id) return;
+        const n = L.keys?.length || 0;
+        out.push({ t: L.t, len: L.dur, label: `${L.name}${n ? ` · ${n} claves` : ' · sin claves'}`, title: `${L.name}: ${n} claves. Doble clic para editar la animacion`,
+          color: ROLE_COLOR[L.role], sel: { type: 'pose', id: L.id }, resize: true, cls: 'pose', uid: 'r' + L.id });
       });
       break;
     case 'auto': case 'moment':
@@ -43,7 +51,7 @@ export function trackItems(tr) {
         const slot = tr.kind === 'moment' ? clipSlotOf(c[2]) : null;
         const ok = (tr.kind === 'auto' ? AUTO_OK : MOMENT_OK).has(c[2]);
         out.push({ t: c[0], len: c[1], label: cutName(c[2]), title: `Corte ${c[2]}: ${cutName(c[2])}${ok ? '' : ' — no valido en esta pista'}`,
-          color: !ok ? '#b33b3b' : slot !== null ? '#7a5cff' : '#2f6fae', sel: { type: 'cam', track: tr.kind, i }, resize: true });
+          color: !ok ? '#a8403f' : slot !== null ? '#6f62c9' : '#3f6f9e', sel: { type: 'cam', track: tr.kind, i }, resize: true });
       });
       break;
     case 'clip':
@@ -51,7 +59,7 @@ export function trackItems(tr) {
         if (evScr(ev) !== K.Band_PlayClip) return;
         const def = clipDef(ev), me = clipChars(def).find(c => roleOfKey(val(c, 'name', 0)) === tr.role); if (!me) return;
         out.push({ t: evTime(ev), len: clipSpan(ev).ms, label: animName(val(me, 'anim', 0)), title: 'Clip ' + nameOf(val(evParams(ev), 'clip', 0)),
-          color: def ? ROLE_COLOR[tr.role] : '#b33b3b', sel: { type: 'event', i }, resize: true });
+          color: def ? ROLE_COLOR[tr.role] : '#a8403f', sel: { type: 'event', i }, resize: true });
       });
       break;
     case 'loop': {
@@ -67,7 +75,7 @@ export function trackItems(tr) {
     case 'events':
       P.events.forEach((ev, i) => {
         const s = evScr(ev); if (s === K.Band_PlayClip || s === K.Band_PlayLoop) return;
-        out.push({ t: evTime(ev), len: 0, label: pretty(nameOf(s)), color: '#4fd18b', sel: { type: 'event', i } });
+        out.push({ t: evTime(ev), len: 0, label: pretty(nameOf(s)), color: '#4f9c78', sel: { type: 'event', i } });
       });
       break;
     case 'light':

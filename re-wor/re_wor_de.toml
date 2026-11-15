@@ -1,48 +1,85 @@
 # Guitar Hero: Warriors of Rock - Definitive Edition (re-wor)
-# Configuracion editable a mano, desde el lanzador (wormod) o desde el panel del juego. Atajos en [hotkeys].
+# Configuracion editable a mano, desde el lanzador o desde el panel del juego.
+# hotkeys: teclas del juego ("F8", "F11", "Backtick", "Insert", "P"...).
 # input.backend: "sdl" (XInput + DirectInput + HID) o "xinput". Requiere reiniciar.
 # mods: el orden es la prioridad (el primero gana si dos mods tienen el mismo archivo).
 
-mods = [
-    { enabled = false, folder = "Again" },
-    { enabled = true, folder = "_wtde_customs" },
-    { enabled = false, folder = "takemeout" },
-]
-
 [dev]
+auto_skip_intro = true
+bridge_port = 8770
+debug_build = false
 log_file_opens = true
 show_fps = false
+target_refresh_rate = 144
+uncapped_fps = true
+
+[graphics]
+async_pipeline_compile = true
+backend = 'd3d12'
+bloom = 0.60000002384185791
+blur = 0.20000000298023224
+brightness = 0.20000000298023224
+contrast = 0.0
+glow = 0.20000000298023224
+grain = 0.0
+letterbox = true
+msaa2x = true
+refresh_hz = 120
+render_target_path = 'rtv'
+resolution = '1080p'
+resolution_scale = 2
+saturation = 0.0
+sharpness = 0.0
+show_fps = true
+texture_cache_mb = 1024
+upscale = 'fsr'
+vignette = 0.0
+vsync = false
+window_mode = 2
+
+[hotkeys]
+achievements = 'F7'
+console = 'Backtick'
+debug_menu = 'F6'
+fullscreen = 'F11'
+panel = 'F8'
+perf_overlay = 'F9'
+settings = 'F10'
+skip_intro = 'F'
 
 [input]
-backend = "sdl"
+backend = 'sdl'
 keyboard_gamepad = false
 keyboard_guitar = true
 keyboard_guitar_subtype = 6
 
-[input.keys]
-green = "F1"
-red = "F2"
-yellow = "F3"
-blue = "F4"
-orange = "F5"
-strum_up = "Numpad1"
-strum_down = "Numpad2"
-start = "Return"
-star_power = "Numpad8"
-whammy = "Numpad0"
-tilt = "Backspace"
-nav_left = "Left"
-nav_right = "Right"
+    [input.keys]
+    blue = 'F4'
+    green = 'F1'
+    nav_left = 'Left'
+    nav_right = 'Right'
+    orange = 'F5'
+    red = 'F2'
+    star_power = 'Numpad8'
+    start = 'Return'
+    strum_down = 'Numpad2'
+    strum_up = 'Numpad1'
+    tilt = 'Backspace'
+    whammy = 'Numpad0'
+    yellow = 'F3'
 
 [performance]
 above_normal_priority = true
 trace_probes = false
 
-[hotkeys]
-panel = "F8"
-fullscreen = "F11"
-perf_overlay = "F9"
-settings = "F10"
-console = "Backtick"
-achievements = "F7"
-skip_intro = "F"
+[[mods]]
+enabled = false
+folder = 'Again'
+
+[[mods]]
+enabled = true
+folder = '_wtde_customs'
+
+[[mods]]
+enabled = false
+folder = 'takemeout'

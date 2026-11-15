@@ -295,3 +295,134 @@ Todo en `re-wor/src/de/native_fx.cpp` (frame logico del juego) + camara en `edfx
   - Escala del movimiento, estabilizador, guias de tercios, zoom vertical y "Soltar" para recolocarse.
 - **Juego:** `ReadCamRaw` (`re-wor/src/de/edfx.cpp`) recorre todos los viewports activos con el mismo criterio que el
   motor (`sub_823E8568`). Escribe en `re_wor_trace.log` una linea `[EDFX] viewports (...)` con cada camara y cual eligio.
+
+## Interfaz v3 y captura de cara (2026-11-14)
+- **Interfaz.** Tema unico oscuro tipo mesa de realizacion: grafito neutro, un solo acento ambar (cursor, seleccion,
+  accion principal) y rojo solo para PROGRAMA / GRABANDO. Tipografia Inter + JetBrains Mono (timecodes), empaquetadas
+  con npm (`@fontsource-variable/*`), sin depender de internet. Tokens en `web/src/css/base.css`.
+- **Iconos.** Solo SVG propios en `web/src/ui/icons.jsx` (rejilla 24, trazo 1.75). Prohibido usar emojis o caracteres
+  como icono. Movimientos de camara: campo `icon` de `camera/presets.js`; efectos: `camera/fx_icons.js`; los looks de
+  color se muestran con una muestra del propio filtro (`FxGlyph` en `ui/camera/FxPanel.jsx`).
+- **Panel derecho.** Riel vertical de secciones (`ui/components/Panel.jsx`): Inspector, Camaras, Efectos, Objetos 3D,
+  Banda, Cara y voz, Vista.
+- **Cara y voz.** Sustituido por la captura v2 (seccion siguiente).
+- **Rig facial de WoR** (igual en los 17 modelos de banda; nombres resueltos con `ghwor_keys.txt`): b063 Jaw, b064/065 Eye
+  L/R, b066/067 Eyelid_Upper, b081/082 Eyelid_Lower, b068/069 Mouth L/R, b070 Lip_Lower_Mid, b071 Lip_Upper_Mid,
+  b072/073 Brow, b074 Brow_Mid, b075/076 Brow_Mid L/R, b077/078 Cheek, b079/080 Cheek_Upper, b083/084
+  Lip_Lower_Corner, b085/086 Lip_Lower, b087/088 Lip_Upper_Corner, b089/090 Lip_Upper, b091 Nostrils, b092 Tongue.
+  Todos cuelgan de b006 Bone_Head (los labios de abajo tambien): al abrir la mandibula hay que llevar con ella el labio
+  inferior. Marco de enlace: +X izquierda del personaje, +Y arriba, +Z delante, metros. Mapa en `FACE_TABLE` (`web/src/rig/faceRig.js`).
+
+## Captura v2: cuerpo, cabeza y rostro al juego (2026-11-15)
+- **App del movil** (`vcam_app`), por modulos: `lib/app` tema, `lib/core` cuaterniones y formato, `lib/net/editor_link.dart`
+  conexion compartida, `lib/native` puentes, `lib/pages` (conexion, inicio con riel de modos, `camera/` camara virtual,
+  `capture/` captura), `lib/widgets` piezas y dibujos. Android: `MainActivity.kt` solo registra canales;
+  `ArPoseTracker.kt` (ARCore, camara virtual), `CaptureEngine.kt` (CameraX + MediaPipe Tasks), `OneEuro.kt` (filtro).
+- **Modos.** *Cuerpo*: MediaPipe Pose (33 puntos 3D en metros, modelo full o heavy en precision alta), sin cara.
+  *Cabeza y rostro*: Face Landmarker, 52 blendshapes ARKit + giro de cabeza (matriz de transformacion facial).
+  *Rostro*: solo blendshapes, 1280x720, para detalle (la cabeza la pone la animacion del juego). Camara frontal o
+  trasera, GPU con caida a CPU, filtro One Euro en todos los canales (suavizado ajustable), puntos tapados se congelan.
+- **Modelos.** `face_landmarker.task`, `pose_landmarker_full/heavy.task` (Google, Apache 2.0) NO van en git: la tarea
+  `downloadModels` de `android/app/build.gradle.kts` los baja a `src/main/assets` si faltan. Se empaquetan sin comprimir.
+- **Protocolo.** movil -> editor `{type:'cap', mode, ok, bs, q, lm:[x,y,z,v]*33}`, `capmode`, `caprec`, `capneutral`;
+  el editor devuelve `capRec` dentro de `state`. Editor: `web/src/capture/` (estado, calibracion, tomas por tramos,
+  exportacion) y `web/src/rig/` (`faceRig.js`, `bodyRig.js`, `apply.js` vista previa y horneado).
+- **Datos.** `proyecto.capture.face.frames [{t, v:[51 blendshapes + yaw, pitch, roll]}]`,
+  `proyecto.capture.body.frames [{t, p:[x,y,z]*33}]`, cada uno con `neutral` y `cfg` (rol, ganancias, espejo).
+- **Exportacion al compilar** (`capture/export.js`): cada toma se hornea a 30 fps en tramos de <=10 s y
+  `POST /api/anim/make` (`editor/song/animgen.py`) escribe `.ska` parciales con el formato de WoR (flags 0x960B5000,
+  mascara de huesos, cuaterniones i16 conjugados, w>=0, traslaciones como delta del enlace; verificado byte a byte
+  contra anims faciales nativas).
+  - Cara: huesos 63-92 (+ cuello/cabeza en modo cabeza) -> eventos `Band_PlayFacialAnim {name, anim}` en
+    `<cancion>_facial` (se crea el array si la cancion no lo tiene); los .ska van dentro del PAK de la cancion.
+  - Cuerpo: huesos 0-15, 18, 25, 26, 93, 94, 126, 127 (rodillas y tobillos los resuelve el juego por IK desde 93/94)
+    -> clip `characters[{name, anim, startframe, endframe, ik...}]` + evento `Band_PlayClip`.
+- **Verificado:** ida y vuelta rig -> .ska -> lectura: cara 0.005 mm, cuerpo 0.094 mm (con IK). Pendiente: probar en
+  el telefono y en el juego.
+
+## Editor de animacion v2, retoques de pose y seleccion multiple (2026-11-15)
+
+- **Arreglo de la exportacion de camaras**: el editor de keyframes trabaja sobre una copia; antes, si no se pulsaba
+  *Aplicar*, Guardar y Compilar usaban la version anterior (la toma quedaba sin claves y "no se exportaba nada").
+  Ahora Guardar y Compilar aplican primero lo que este abierto, y la escritura busca la toma por id en el proyecto
+  actual (deshacer del proyecto lo sustituye por una copia). El dialogo de compilacion cuenta las tomas exportadas de
+  verdad y avisa de las que estan en escenas apagadas.
+- **Transiciones** (`keyframes/easing.js`): lineal, suave, mantener, escalones, Bezier editable (dos tiradores y
+  presets) y 10 familias (sine, quad, cubic, quart, quint, expo, circ, back, elastic, bounce) en entrada, salida,
+  ambas y salida-entrada. Por clave, con miniatura de la curva. En camaras ademas se elige el camino: curvo
+  (Catmull-Rom) o recto, independiente del ritmo.
+- **Gizmo 3D** (`keyframes/gizmo3d.js`, estilo Blender/Unity): clic en un cono de la camara (o en una articulacion
+  del musico) y moverlo/girarlo en la vista. G mover, R girar, L ejes mundo/propios, I clave automatica.
+  En el panel: valores numericos, etiquetas arrastrables (Mayus = fino), operaciones sobre varias claves (desplazar,
+  girar, escalar tiempo, invertir, repartir, igualar).
+- **Retoques de pose** (`rig/poseLayer.js`, `rig/poseExport.js`): pista *Retoques de pose* en cada musico. Las claves
+  son giros extra por hueso sobre lo que ya hace el musico (loop, clip o captura), con fundido. Al compilar se hornea
+  la pose final en clips del juego (`es_pose_*`, ska parcial a 30 fps) y se quita al musico de los clips que se
+  solapan (las camaras de esos clips se conservan).
+- **Seleccion multiple** (`core/selection.js`): Ctrl/Mayus + clic, Mayus + arrastrar (recuadro por varias pistas),
+  Ctrl+A, arrastrar el grupo, Alt+flechas, Ctrl+C/V/D, Supr. Inspector de grupo: encadenar, repartir, al cursor,
+  igualar duracion.
+- Con el editor de keyframes abierto, sus atajos mandan; el global solo conserva Ctrl+S.
+- `?debug` expone `window.__ES` (estado, kf, shots, pose, poseExport, sel, edit, easing) para pruebas sin ventana.
+
+## App del movil: deteccion, 16 KB y personaje 3D (2026-11-15)
+
+- **Deteccion**: el modelo de MediaPipe se carga en el hilo de la camara (antes congelaba la interfaz: "Skipped 276
+  frames"); la imagen se gira a mano antes de detectar (como en los ejemplos oficiales); umbrales 0,4. MediaPipe usa
+  la CPU por defecto: en GPU Mali (p. ej. Redmi Note 10S) el delegado GPU detecta mal sin dar error (los avisos
+  `Gralloc4 ... format 56/59` del log). Opcion "Acelerar con la GPU" en la pantalla de captura; el chip de fps dice
+  cual se usa.
+- **16 KB**: CameraX 1.6.2 y MediaPipe 0.10.35 (sus .so ya vienen alineados), librerias nativas sin comprimir
+  (`useLegacyPackaging = false`). Comprobado en el APK arm64: los 9 .so alineados (segmentos y posicion en el zip).
+  `libVkLayer_khronos_validation.so` solo esta en los APK de depuracion. Instalar el de release:
+  `flutter build apk --release --split-per-abi` -> `app-arm64-v8a-release.apk`.
+- **Personaje 3D** en la captura: WebView con three.js y el MISMO rig que el editor (`web/preview/main.js` usa
+  `rig/bodyRig.js` y `rig/faceRig.js`), asi que lo que se ve en el telefono es lo que se exporta. Arrastrar gira la
+  vista; la miniatura muestra los puntos detectados (tocarla los pone en grande). Generar antes de compilar la app:
+  `python -m editor.band.phone_model` (desde EditorSong): elige el personaje vestido mas ligero de `cache/band`,
+  quita instrumentos, incrusta las texturas a 512 px y compila `preview.js`. Ni el .glb ni preview.js van a git.
+- **Captura que moria a 0 fps (arreglado)**: MediaPipe en vivo descarta fotogramas sin llamar al resultado; la marca
+  "fotograma en curso" caducaba nunca y la deteccion se paraba tras el primer resultado. Ahora caduca a los 400 ms.
+  Ademas: cada `start` devuelve `ok:<sesion>` y la pantalla que se cierra solo para la suya (antes la de cabeza
+  apagaba la de cuerpo recien abierta); al volver a la app se reanuda sola (`onPause`/`onResume`); un vigilante
+  manda fps reales y "no detecto" cada medio segundo.
+
+## Captura fluida, camara del PC y movimiento mas natural (2026-11-15)
+
+- **Fluidez**: `capture/live.js` interpola las muestras en vivo (reproduce ~1,25 intervalos en el pasado). La vista
+  del editor, la vista previa del movil y la grabacion van a 60/30 por segundo aunque la deteccion de menos. La
+  grabacion rellena todos los huecos de 33 ms (comprobado: 84 fotogramas en 2,7 s, cada 33 ms exactos, sin repetidos,
+  con solo 11 detecciones/s) y descuenta el retraso para que la toma caiga en su sitio de la cancion.
+- **Movil mas rapido**: analisis a 640x480 (720p solo con "Precision alta"), 2 fotogramas en MediaPipe a la vez
+  (conversion solapada con la deteccion) y la interfaz se repinta como mucho 20 veces/s.
+- **Camara del PC** (seccion Captura, tarjeta "Camara del PC"): lista las camaras, elige modo (cuerpo / cabeza y rostro
+  / rostro) y corre MediaPipe en el navegador con la GPU (`capture/webcam.js`). Mismos mensajes que el movil: calibrar,
+  grabar y exportar igual. Con ella encendida se ignora el movil. El WASM va en `dist/mediapipe` (copiado al compilar)
+  y los modelos los sirve `/api/mp/model` (los de la app si existen; si no, se descargan una vez a `cache/models`).
+  Hay que reiniciar el editor para que cargue la ruta nueva.
+- **Movimiento** (`rig/bodyRig.js`, compartido por editor, exportacion y movil): cada brazo y pierna pesa segun la
+  visibilidad de sus puntos (lo que no se ve vuelve suave al reposo), la pelvis sin caderas visibles solo sigue el
+  giro de los hombros, la rodilla no se dobla hacia atras y los pies solo se apoyan en el suelo si se ven. Las tomas
+  de cuerpo guardan ahora la visibilidad (x, y, z, vis); las antiguas siguen funcionando.
+- **Cara sin deformar** (`rig/faceRig.js`, igual en editor, exportacion y movil): curva por canal (zona muerta y
+  compresion de los valores altos), los canales que MediaPipe dispara juntos ya no se suman dos veces (sonrisa con
+  estirar/hoyuelo/labio; mandibula con labio inferior), simetria parcial de la boca y tope suave por hueso con las
+  amplitudes del juego. Sonrisa fuerte: comisura de 22 a 10 mm; boca abierta: mandibula de 24 a ~18 grados.
+  Ajustes nuevos en "Rostro en el personaje": Contencion (0 = como antes) y Simetria de la boca.
+
+## Dedos, micro y pie del cantante (2026-11-15)
+
+- **Dedos**: en modo cuerpo se detectan tambien las manos (MediaPipe Hand Landmarker; camara del PC y app, opcion
+  "Manos y dedos"). `rig/handRig.js` orienta la palma y las 3 falanges de cada dedo (huesos 33-62 del juego) hacia
+  los 21 puntos de cada mano, con tope de flexion. Sin mano a la vista los dedos se quedan como estaban.
+- **Formato**: el fotograma de cuerpo pasa a 262 valores (33x4 cuerpo + 2 manos x 64 + 2 de agarre del micro; ver
+  `capture/channels.js`). Las tomas antiguas siguen valiendo.
+- **Micro** (`rig/micRig.js`): en WoR el micro cuelga de huesos del cantante (122 pie -> 123 alto del pie -> 124 ->
+  125 micro -> 126/127 manos). Medido en el juego: en la mano, el micro va con un agarre fijo sobre la palma
+  (~7 cm) y el pie se queda donde estaba. La camara no reconoce el micro como objeto; se deduce de las manos: mano
+  cerrada junto a la boca 1/4 s = lo coge; abierta 0.3 s = lo suelta (sin dedos: muneca en la boca / lejos 1.5 s).
+  El pie se pone en el suelo delante de la boca del personaje, a su altura. "Rostro/Cuerpo en el personaje" ->
+  Microfono: automatico, siempre en una mano, siempre en el pie, o no tocar.
+- **Exportacion**: los clips del cuerpo llevan los 30 huesos de dedos (si la toma tiene manos) y 122-125 con
+  posicion (cantante). Comprobado en memoria: 57 huesos horneados, el micro viaja del pie a la mano y vuelve.
+- Arreglado: la captura en vivo no movia al personaje en un proyecto sin calibrar ni grabar nada.

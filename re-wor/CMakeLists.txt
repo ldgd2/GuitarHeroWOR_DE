@@ -57,8 +57,12 @@ set(REWOR_SOURCES
     src/de/de_config.cpp
     src/de/de_hooks.cpp
     src/de/de_panel.cpp
+    src/de/qb_bridge.cpp
+    src/de/gfx_options.cpp
     src/de/edfx.cpp
     src/de/native_fx.cpp
+    src/de/render_sandbox.cpp
+    src/de/cam_watch.cpp
     src/de/mod_manager.cpp
     src/memory/memory_heaps.cpp
     src/integrations/discord/discord_rpc.cpp
@@ -154,3 +158,33 @@ add_custom_target(re_wor_codegen
     COMMENT "Generating recompiled code for re_wor"
     VERBATIM
 )
+
+# La GPU (rexgpu-xenos) es un plugin que se carga en tiempo de ejecucion: compilarlo con el juego y copiarlo
+# junto al ejecutable, para que los cambios en thirdparty/rexglue-sdk/src/graphics lleguen al juego.
+if(TARGET rexgpu-xenos)
+    add_dependencies(re_wor rexgpu-xenos)
+    add_custom_command(TARGET re_wor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rexgpu-xenos> $<TARGET_FILE_DIR:re_wor>
+        COMMENT "Copiando el plugin de GPU junto al juego")
+endif()
+
+# Scripts QB propios (qb/*.q): se compilan con tools/qbc.py en <carpeta del juego>/qb y el juego los
+# registra al arrancar (Options > Graphics, etc.). Solo hace falta Python 3.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+file(GLOB REWOR_QB_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qb/*.q)
+if(Python3_Interpreter_FOUND AND REWOR_QB_SOURCES)
+    set(REWOR_QB_OUTPUTS "")
+    foreach(src ${REWOR_QB_SOURCES})
+        get_filename_component(stem ${src} NAME_WE)
+        set(out ${CMAKE_CURRENT_BINARY_DIR}/qb/${stem}.qb.xen)
+        add_custom_command(OUTPUT ${out}
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/qbc.py ${src} ${out}
+            DEPENDS ${src} ${CMAKE_CURRENT_SOURCE_DIR}/tools/qbc.py
+            COMMENT "Compilando qb/${stem}.q")
+        list(APPEND REWOR_QB_OUTPUTS ${out})
+    endforeach()
+    add_custom_target(re_wor_qb ALL DEPENDS ${REWOR_QB_OUTPUTS})
+    add_dependencies(re_wor re_wor_qb)
+elseif(REWOR_QB_SOURCES)
+    message(WARNING "No se encontro Python 3: los scripts de qb/ (menu Options > Graphics) no se compilaran")
+endif()

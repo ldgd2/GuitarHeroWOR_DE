@@ -3,7 +3,7 @@ import { K } from './qb.js';
 
 export const ROLES = ['guitarist', 'bassist', 'vocalist', 'drummer'];
 export const ROLE_ES = { guitarist: 'Guitarrista', bassist: 'Bajista', vocalist: 'Cantante', drummer: 'Bateria' };
-export const ROLE_COLOR = { guitarist: '#ff7a45', bassist: '#4aa3ff', vocalist: '#c77dff', drummer: '#46c27a' };
+export const ROLE_COLOR = { guitarist: '#d9824e', bassist: '#5f97d4', vocalist: '#a78bd4', drummer: '#5bb58a' };
 export const roleOfKey = k => ROLES.find(r => K[r] === (k >>> 0));
 export const NODE_OF = { vocalist: 'TRG_Geo_Camera_Performance_SING01', guitarist: 'TRG_Geo_Camera_Performance_GUIT01',
   bassist: 'TRG_Geo_Camera_Performance_BASS01', drummer: 'TRG_Geo_Camera_Performance_DRUM01' };

@@ -7,6 +7,16 @@ import { clearSongAnims } from '../viewport/anim.js';
 import { loadVenue } from '../viewport/venue.js';
 import { ask, confirmBox, dialog, toast } from './overlay.js';
 import { materialize } from '../camera/shots.js';
+import { materializeCapture } from '../capture/export.js';
+import { materializePoses } from '../rig/poseExport.js';
+
+// Lo que esta abierto en el editor de animacion es una copia: guardar y compilar la pasan antes al proyecto (antes
+// se guardaba y compilaba la version anterior y la animacion editada "no se exportaba").
+// (import diferido: kf.js -> vcam.js -> capture.js -> playback.js -> actions.js formaria un ciclo al arrancar)
+async function commitOpenEditors() {
+  const { KF, kfCommit } = await import('../keyframes/kf.js');
+  return KF.on ? kfCommit() : false;
+}
 
 export async function openSong(id, preferSaved = true) {
   if (S.dirty && !await confirmBox('Hay cambios sin guardar. Abrir otra cancion igualmente?', 'Abrir', 'danger')) return;
@@ -36,9 +46,10 @@ export async function setVenue(zone, remember = true) {
 
 export async function save() {
   if (!S.proj) return;
+  const kf = await commitOpenEditors();
   const r = await api('/api/save', { method: 'POST', body: JSON.stringify(S.proj) });
   S.dirty = false; emit('song');
-  toast(`Proyecto guardado (${r.saved.split(/[\\/]/).pop()}). El juego no se ha tocado.`);
+  toast(`Proyecto guardado (${r.saved.split(/[\\/]/).pop()})${kf ? ', con la animacion que estabas editando' : ''}. El juego no se ha tocado.`);
 }
 
 export async function reload() {
@@ -55,10 +66,20 @@ export async function build() {
     ${st.game_running ? '<p class="warn">El juego esta abierto: el cambio se vera la proxima vez que cargue la cancion.</p>' : ''}`, [['cancel', 'Cancelar'], ['go', 'Compilar', 'primary']]);
   if (ok !== 'go') return;
   try {
+    const kf = await commitOpenEditors();
     // las tomas de camara del editor se convierten en camaras .ska + clips + cortes (en una copia)
-    const n = (S.proj.shots || []).length;
-    if (n) toast(`Generando ${n} camara(s) a partir de las tomas...`);
-    const { proj, warnings, edfx } = await materialize(S.proj);
+    const all = (S.proj.shots || []).length;
+    if (all) toast(`Generando las camaras a partir de ${all} toma(s)...`);
+    const { proj, warnings, edfx, shots: n, skipped } = await materialize(S.proj);
+    if (kf) warnings.unshift('La animacion abierta en el editor de keyframes se ha aplicado antes de compilar.');
+    if (skipped) warnings.push(`${skipped} toma(s) estan en escenas apagadas (ojo tachado en la pista) y no se exportan.`);
+    // captura del movil: caras (Band_PlayFacialAnim) y cuerpos (clips) en el formato del juego
+    if (proj.capture?.face?.frames?.length || proj.capture?.body?.frames?.length) toast('Generando las animaciones capturadas...');
+    const capRes = await materializeCapture(proj, warnings);
+    // retoques de pose de los musicos: se hornea la pose final a clips del juego
+    if ((S.proj.poseLayers || []).some(L => L.keys?.length)) toast('Horneando los retoques de pose...');
+    const poseRes = await materializePoses(proj, warnings);
+    delete proj.__camClips;
     const r = await api('/api/build', { method: 'POST', body: JSON.stringify(proj) });
     // el proyecto fuente (con tomas y objetos editables) se guarda aparte: al reabrir se sigue editando igual
     await api('/api/save', { method: 'POST', body: JSON.stringify(S.proj) });
@@ -67,8 +88,11 @@ export async function build() {
     S.dirty = false; emit('song');
     if (!bad.length) toast('Compilado y validado sin errores.');
     dialog(`<h3>Compilado</h3><p>Escrito en <code>${esc(r.written)}</code><br>Copia: <code>${esc(r.backup)}</code></p>
-      ${n ? `<p>${n} toma(s) de camara convertidas en camaras del juego (clip + corte de momento).</p>` : ''}
+      ${n ? `<p>${n} toma(s) de camara convertidas en camaras del juego (clip + corte de momento).</p>` : all ? '<p class="warn">Ninguna toma de camara se ha podido exportar (mira los avisos).</p>' : ''}
+      ${poseRes.clips ? `<p>Retoques de pose: ${poseRes.layers} retoque(s) en ${poseRes.clips} clip(s) con la animacion final del musico.</p>` : ''}
       ${r.added_skas.length ? `<p>${r.added_skas.length} animacion(es) nuevas anadidas al PAK.</p>` : ''}
+      ${capRes.face ? `<p>Cara: ${capRes.face} animacion(es) facial(es) del juego (eventos Band_PlayFacialAnim).</p>` : ''}
+      ${capRes.body ? `<p>Cuerpo: ${capRes.body} clip(s) con la animacion capturada.</p>` : ''}
       ${r.edfx ? `<p>Para re-wor (<code>${esc(r.edfx)}</code>): ${edfx.fx} efecto(s) de imagen, ${edfx.props} objeto(s)/texto(s) en ${edfx.shots} toma(s), ${edfx.sync} eventos de sincronia.</p>
         <p class="note">Estos los dibuja re-wor encima del juego (el juego original no los conoce). Los filtros de color (B/N, sepia...) son aproximados.</p>` : ''}
       ${edfx.pyro ? `<p>${edfx.pyro} disparo(s) de pirotecnia nativa (nota 78 de luces) a partir de las columnas de fuego.</p>` : ''}

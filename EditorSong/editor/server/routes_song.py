@@ -28,7 +28,10 @@ def project(req):
     sid = req.arg("id")
     f = _saved_file(sid)
     if req.query.get("saved") == "1" and f.exists():
-        return json.loads(f.read_text(encoding="utf-8"))
+        saved = json.loads(f.read_text(encoding="utf-8"))
+        if "facial" not in saved:   # proyectos guardados antes de exportar caras: se leen del PAK
+            saved["facial"] = load_project(sid).get("facial", [])
+        return saved
     return load_project(sid)
 
 
@@ -82,6 +85,17 @@ def camera_make(req):
     if not re.fullmatch(r"[A-Za-z0-9_]{1,60}", name):
         raise ValueError("nombre de camara no valido")
     return make_camera(name, j.get("keys") or [], j.get("fov") or [])
+
+
+@router.post("/api/anim/make")
+def anim_make(req):
+    """Animacion de cara o cuerpo capturada con el movil -> .ska parcial en cache/imports (al PAK al compilar)."""
+    from ..song.animgen import make_anim
+    j = json.loads(req.body or b"{}")
+    name = str(j.get("name", ""))
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,60}", name):
+        raise ValueError("nombre de animacion no valido")
+    return make_anim(name, int(j.get("n", 0)), j.get("bones") or {})
 
 
 @router.get("/api/audio")

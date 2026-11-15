@@ -41,7 +41,7 @@ def load_project(song_id: str) -> dict:
     proj = {"version": 1, "song": {"id": song_id, "name": name, "file": str(p), "compressed": compressed,
                                    "editable": song_id.startswith("mod:")},
             "events": [], "clips": {}, "cameras": {"auto": [], "moment": []},
-            "notes": {k: [] for k in NOTE_TRACKS}, "fretbars": [], "gems": [], "bandmoments": [], "skas": [],
+            "facial": [], "notes": {k: [] for k in NOTE_TRACKS}, "fretbars": [], "gems": [], "bandmoments": [], "skas": [],
             "imports": {}}
     for e in ents:
         if e.type == SKA:
@@ -61,6 +61,9 @@ def load_project(song_id: str) -> dict:
             for it in q.items:
                 if it.name == qbkey(f"{name}_scriptevents") and isinstance(it.value, QbArray):
                     proj["events"] = [struct_to_json(s) for s in it.value.values] if it.value.elem == "struct" else []
+                elif it.name == qbkey(f"{name}_facial") and isinstance(it.value, QbArray):
+                    # caras de la banda: {time, scr: Band_PlayFacialAnim, params: {name: VOCALIST, anim}}
+                    proj["facial"] = [struct_to_json(s) for s in it.value.values] if it.value.elem == "struct" else []
                 elif isinstance(it.value, QbStruct) and isinstance(it.value.get(qbkey("characters")), QbArray):
                     proj["clips"][f"0x{it.name:08x}"] = struct_to_json(it.value)
                 else:

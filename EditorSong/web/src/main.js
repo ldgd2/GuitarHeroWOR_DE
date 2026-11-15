@@ -39,7 +39,11 @@ mount('ui-top', TopBar); mount('ui-panel', Panel); mount('ui-transport', Transpo
 mount('ui-viewtools', ViewTools); mount('ui-overlays', Overlays); mount('ui-timeline', Timeline);
 mount('ui-kfdock', KfDock); mount('ui-kfside', KfSide);
 // pruebas automaticas sin ventana (?debug): acceso al estado y a las acciones principales
-if (new URLSearchParams(location.search).has('debug')) import('./keyframes/kf.js').then(kf => { window.__ES = { S, openSong, kf }; });
+if (new URLSearchParams(location.search).has('debug')) {
+  Promise.all([import('./keyframes/kf.js'), import('./camera/shots.js'), import('./rig/poseLayer.js'), import('./rig/poseExport.js'),
+    import('./core/selection.js'), import('./timeline/edit.js'), import('./keyframes/easing.js'), import('./capture/webcam.js'), import('./capture/capture.js'), import('./viewport/band.js'), import('./rig/apply.js')])
+    .then(([kf, shots, pose, poseExport, sel, edit, easing, webcam, capture, bandv, rigApply]) => { window.__ES = { S, openSong, kf, shots, pose, poseExport, sel, edit, easing, webcam, capture, bandv, rigApply }; });
+}
 start();
 
 // vista 3D ampliada: oculta el monitor y estira la vista principal

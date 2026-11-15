@@ -8,7 +8,7 @@ import { drawFx2D, FX2D } from './fx2d.js';
 import { fxDefaults } from '../camera/presets.js';
 
 // Looks de color: aproximacion CSS de la matriz de color que usa el juego
-const LOOK_CSS = {
+export const LOOK_CSS = {
   teal: k => `sepia(${0.2 * k}) hue-rotate(${-15 * k}deg) saturate(${1 + 0.25 * k}) contrast(${1 + 0.12 * k})`,
   blockbuster: k => `hue-rotate(${-10 * k}deg) saturate(${1 - 0.15 * k}) contrast(${1 + 0.2 * k}) brightness(${1 - 0.03 * k})`,
   bleach: k => `saturate(${1 - 0.55 * k}) contrast(${1 + 0.4 * k}) brightness(${1 + 0.05 * k})`,

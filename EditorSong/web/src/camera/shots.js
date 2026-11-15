@@ -14,9 +14,10 @@ import { clipSlotOf, NODE_OF, ROLES } from '../core/roles.js';
 import { beatsAt, loopAt } from '../song/clips.js';
 import { nodePos, nodeQuat } from '../viewport/venue.js';
 import { FRAMINGS, PRESETS, ROLE_AIM } from './presets.js';
-import { shotPriority, shotTrack, trackActive } from '../timeline/layout.js';
+import { poseTrack, shotPriority, shotTrack, trackActive } from '../timeline/layout.js';
 import { buildEdfx } from './edfx.js';
 import { activeFx, shakeOf } from '../viewport/fx.js';
+import { easeValue } from '../keyframes/easing.js';
 
 export const shots = () => (S.proj.shots ||= []);
 let nextId = 1;
@@ -72,18 +73,22 @@ export function localPose(s, t) {
 
 // ---------- animacion personalizada (keyframes) ----------
 // s.keys = [{t: ms desde el inicio de la toma, p: [x,y,z] mundo, q: [x,y,z,w] (three, mira a -Z), fov: horizontal,
-//            ease?: como se va de ESTA clave a la siguiente (ver EASES; sin ease = s.interp)}]
+//            ease?: curva de tiempo hacia la SIGUIENTE clave (keyframes/easing.js; sin ease = s.interp),
+//            path?: 'curve' | 'line' forma del camino hacia la siguiente, bez?: [x1,y1,x2,y2], steps?: n}]
 // s.interp: 'smooth' (Catmull-Rom en posicion) | 'linear' (por defecto de las claves sin ease)
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
 const V = a => new THREE.Vector3(a[0], a[1], a[2]);
-export const EASES = [['auto', 'Como la toma'], ['smooth', 'Curva suave'], ['linear', 'Lineal'], ['easeInOut', 'Acelerar y frenar'],
-  ['easeIn', 'Acelerar'], ['easeOut', 'Frenar'], ['hold', 'Mantener (corte)']];
-const EASE_FN = {
-  linear: f => f, smooth: f => f, hold: () => 0,
-  easeIn: f => f * f * f, easeOut: f => 1 - (1 - f) ** 3,
-  easeInOut: f => (f < 0.5 ? 4 * f * f * f : 1 - (-2 * f + 2) ** 3 / 2),
-};
+export { EASES } from '../keyframes/easing.js';
 export const keyEase = (s, k) => (k.ease && k.ease !== 'auto' ? k.ease : s.interp === 'linear' ? 'linear' : 'smooth');
+// camino: el de la clave; si no tiene, curvo con la curva suave y recto con el resto (como antes)
+export const keyPath = (s, k) => k.path || (keyEase(s, k) === 'smooth' ? 'curve' : 'line');
+// Catmull-Rom uniforme por p0..p3 en f
+export function catmull(p0, p1, p2, p3, f) {
+  const f2 = f * f, f3 = f2 * f;
+  return p1.clone().multiplyScalar(2).add(p2.clone().sub(p0).multiplyScalar(f))
+    .add(p0.clone().multiplyScalar(2).sub(p1.clone().multiplyScalar(5)).add(p2.clone().multiplyScalar(4)).sub(p3).multiplyScalar(f2))
+    .add(p1.clone().multiplyScalar(3).sub(p0).sub(p2.clone().multiplyScalar(3)).add(p3).multiplyScalar(f3)).multiplyScalar(0.5);
+}
 export function keyPose(s, t) {
   const K = s.keys, rt = t - s.t, u = Math.min(1, Math.max(0, rt / Math.max(1, s.dur)));
   if (rt <= K[0].t || K.length === 1) return { p: V(K[0].p), q: new THREE.Quaternion(...K[0].q), fov: K[0].fov, u };
@@ -91,18 +96,12 @@ export function keyPose(s, t) {
   if (rt >= L.t) return { p: V(L.p), q: new THREE.Quaternion(...L.q), fov: L.fov, u };
   let i = 1; while (i < K.length - 1 && K[i].t < rt) i++;
   const a = K[i - 1], b = K[i], mode = keyEase(s, a);
-  const f0 = (rt - a.t) / Math.max(1e-6, b.t - a.t), f = EASE_FN[mode](f0);
-  let p, fr = f;
-  if (mode === 'smooth') {
-    const p0 = V((K[i - 2] || a).p), p1 = V(a.p), p2 = V(b.p), p3 = V((K[i + 1] || b).p);
-    const f2 = f0 * f0, f3 = f2 * f0;
-    p = p1.clone().multiplyScalar(2).add(p2.clone().sub(p0).multiplyScalar(f0))
-      .add(p0.clone().multiplyScalar(2).sub(p1.clone().multiplyScalar(5)).add(p2.clone().multiplyScalar(4)).sub(p3).multiplyScalar(f2))
-      .add(p1.clone().multiplyScalar(3).sub(p0).sub(p2.clone().multiplyScalar(3)).add(p3).multiplyScalar(f3)).multiplyScalar(0.5);
-    fr = b.t - a.t > 120 ? f0 * f0 * (3 - 2 * f0) : f0;   // entre claves separadas, giro suave (las del movil van densas)
-  } else p = V(a.p).lerp(V(b.p), f);
+  const f0 = (rt - a.t) / Math.max(1e-6, b.t - a.t), f = easeValue(mode, a, f0);
+  const p = keyPath(s, a) === 'curve' ? catmull(V((K[i - 2] || a).p), V(a.p), V(b.p), V((K[i + 1] || b).p), f) : V(a.p).lerp(V(b.p), f);
+  // la curva suave antigua gira con suavizado entre claves separadas (las del movil van densas)
+  const fr = mode === 'smooth' ? (b.t - a.t > 120 ? f0 * f0 * (3 - 2 * f0) : f0) : f;
   _qa.set(...a.q); _qb.set(...b.q);
-  return { p, q: _qa.clone().slerp(_qb, fr), fov: a.fov + (b.fov - a.fov) * fr, u };
+  return { p, q: _qa.clone().slerp(_qb, fr), fov: Math.min(150, Math.max(5, a.fov + (b.fov - a.fov) * fr)), u };
 }
 
 // pose en el mundo (para el monitor)
@@ -141,11 +140,19 @@ export function bakeKeys(s) {
   return { keys, fov };
 }
 
-async function loopFor(role, t) {
+// musicos con retoque de pose en [a, b): su animacion va en el clip del retoque (rig/poseExport.js) y el juego
+// solo lleva un clip por musico a la vez, asi que la camara de la toma se apoya en otro
+function poseBusy(a, b) {
+  const out = new Set();
+  for (const L of S.proj?.poseLayers || []) if (L.keys?.length && trackActive(poseTrack(L)) && L.t < b && L.t + L.dur > a) out.add(L.role);
+  return out;
+}
+
+async function loopFor(role, t, busy = new Set()) {
   // musico que va en el clip: el del plano (si tiene loop); la bateria toca segun las notas, asi que para
   // ella se usa otro musico con loop y la camara sigue anclada a la bateria
   for (const r of [role, ...ROLES.filter(x => x !== role && x !== 'drummer')]) {
-    if (r === 'drummer') continue;
+    if (r === 'drummer' || busy.has(r)) continue;
     const l = loopAt(r, t);
     if (l?.male) return { role: r, anim: l.male };
   }
@@ -156,14 +163,15 @@ async function loopFor(role, t) {
 export async function materialize(proj, onProgress) {
   const P = JSON.parse(JSON.stringify(proj)), list = (proj.shots || []).filter(s => trackActive(shotTrack(s)));
   const warnings = [];
+  P.__camClips = [];
   for (const [n, s] of list.entries()) {
     onProgress?.(n, list.length);
     const name = shotName(s);
     const { keys, fov } = bakeKeys(s);
     const ska = await api('/api/camera/make', { method: 'POST', body: JSON.stringify({ name, keys, fov }) });
     P.skas = P.skas.filter(x => x.id !== ska.id).concat([ska]);
-    const who = await loopFor(s.role, s.t);
-    if (!who) { warnings.push(`Toma ${n + 1}: no hay ningun musico con loop en ese momento; se omite.`); continue; }
+    const who = await loopFor(s.role, s.t, poseBusy(s.t, s.t + s.dur));
+    if (!who) { warnings.push(`Toma ${s.id}: no hay ningun musico libre con loop en ese momento (los que tienen retoque de pose van en su propio clip); se omite.`); continue; }
     let tf = 1;
     try { const a = await api('/api/band/anim?id=' + hx(who.anim)); if (a.duration > 0) tf = Math.min(1, a.duration / (s.dur / 1000)); } catch { /* sin datos */ }
     const frames = Math.max(2, Math.round(s.dur / 1000 * 30));
@@ -177,6 +185,7 @@ export async function materialize(proj, onProgress) {
       ['array', 0x65C1ECD3, { elem: 'empty', values: [] }]]);
     P.events.push(mkStruct([['int', 'time', s.t], ['qbkey', 'scr', K.Band_PlayClip], ['struct', 'params', mkStruct([
       ['qbkey', 'clip', ck], ['int', 'startframe', 0], ['int', 'endframe', frames]])]]));
+    P.__camClips.push(hx(ck));
     // corte de momento 3 (= slot 0) durante la toma; los cortes de momento que se solapan se recortan
     const a = s.t, b = s.t + s.dur, mom = [];
     for (const c of P.cameras.moment) {
@@ -201,5 +210,6 @@ export async function materialize(proj, onProgress) {
   P.edfx = fx.text;
   delete P.shots; delete P.props; delete P.effects; delete P.layout;
   P.events.sort((x, y) => val(x, 'time', 0) - val(y, 'time', 0));
-  return { proj: P, warnings, edfx: fx.info };
+  return { proj: P, warnings, edfx: fx.info, shots: list.length - warnings.filter(w => w.startsWith('Toma ')).length,
+    skipped: (proj.shots || []).length - list.length };
 }

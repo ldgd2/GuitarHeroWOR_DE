@@ -38,6 +38,7 @@ dependencies:
   sensors_plus: ^7.1.1
   shared_preferences: ^2.5.6
   wakelock_plus: ^1.8.2
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   flutter_test:
@@ -60,6 +61,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  # vista previa 3D (index.html; preview.js y character.glb se generan: python -m editor.band.phone_model)
+  assets:
+    - assets/preview/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

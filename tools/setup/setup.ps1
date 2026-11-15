@@ -121,12 +121,22 @@ if (-not $cv -or $cv -lt [version]"3.25.0") { InstalarPaquete "Kitware.CMake"; $
 if (-not $cv) { Falla "No se pudo instalar CMake." }
 Ok "CMake $cv"
 
-# Clang: CMakePresets.json lo busca en C:\Program Files\LLVM (donde lo deja el instalador oficial)
-$clang = "C:\Program Files\LLVM\bin\clang.exe"
-$lv = $null; if (Test-Path $clang) { $lv = Version $clang @("--version") }
-if (-not $lv -or $lv -lt [version]"20.0.0") { InstalarPaquete "LLVM.LLVM"; if (Test-Path $clang) { $lv = Version $clang @("--version") } }
-if (-not $lv) { Falla "No se pudo instalar LLVM/Clang en C:\Program Files\LLVM." }
-Ok "Clang $lv"
+# Clang: donde este instalado (registro del instalador oficial, PATH o %ProgramFiles%\LLVM). vsenv.bat hace la misma
+# busqueda y se lo pasa a CMakePresets.json en REWOR_LLVM.
+function ClangExe {
+    $dirs = @()
+    try { $dirs += (Get-ItemProperty "HKLM:\SOFTWARE\LLVM\LLVM" -ErrorAction Stop).'(default)' } catch {}
+    $c = Get-Command "clang.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c) { $dirs += (Split-Path (Split-Path $c.Source)) }
+    $dirs += (Join-Path $env:ProgramFiles "LLVM")
+    foreach ($d in $dirs) { if ($d -and (Test-Path (Join-Path $d "bin\clang.exe"))) { return (Join-Path $d "bin\clang.exe") } }
+    return $null
+}
+$clang = ClangExe
+$lv = $null; if ($clang) { $lv = Version $clang @("--version") }
+if (-not $lv -or $lv -lt [version]"20.0.0") { InstalarPaquete "LLVM.LLVM"; RecargarPath; $clang = ClangExe; if ($clang) { $lv = Version $clang @("--version") } }
+if (-not $lv) { Falla "No se pudo instalar LLVM/Clang (20 o superior)." }
+Ok "Clang $lv ($clang)"
 
 # Visual Studio 2022 con C++ (enlazador, rc.exe, ninja y el Windows SDK)
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -236,10 +246,11 @@ if ($SinCompilar) {
 if ($ConMovil) {
     Paso "Extra: app de la camara del movil (Flutter)"
     if (-not (Existe "flutter")) {
-        $fl = "C:\dev\flutter"
+        # sin Flutter en el PATH: se instala en la carpeta de programas del usuario (o donde diga FLUTTER_ROOT)
+        $fl = if ($env:FLUTTER_ROOT) { $env:FLUTTER_ROOT } else { Join-Path $env:LOCALAPPDATA "flutter" }
         if (-not (Test-Path "$fl\bin\flutter.bat")) {
             Info "Clonando Flutter (estable) en $fl ..."
-            New-Item -ItemType Directory -Force "C:\dev" | Out-Null
+            New-Item -ItemType Directory -Force (Split-Path $fl) | Out-Null
             Run "Clonar Flutter" { git clone --depth 1 -b stable https://github.com/flutter/flutter.git $fl }
         }
         $up = [Environment]::GetEnvironmentVariable("Path", "User")

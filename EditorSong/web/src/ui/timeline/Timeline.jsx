@@ -6,13 +6,15 @@ import { changed, dropUndo, emit, fmt, pushUndo, S } from '../../core/state.js';
 import { GROUP_GAP, GROUP_H, HEAD, TRACK_H, trackItems } from '../../timeline/lanes.js';
 import { isUserTrack, layout, newId, USER_KINDS } from '../../timeline/layout.js';
 import { msOf, xOf } from '../../timeline/coords.js';
-import { addAt, fxOf, propOf, setLen, setT, shotOf, snapT } from '../../timeline/edit.js';
+import { addAt, fxOf, getLen, getT, movable, propOf, setLen, setT, shotOf, snapT } from '../../timeline/edit.js';
+import { isSel, selList, setSelection, toggleSel } from '../../core/selection.js';
+import { layerOf } from '../../rig/poseLayer.js';
+import { kfOpen, kfOpenPose } from '../../keyframes/kf.js';
 import { A, toggleGroup } from '../../audio/player.js';
 import { ask, confirmBox } from '../overlay.js';
 import { Icon, useBus, useEffect, useLayoutEffect, useRef, useState } from '../react.jsx';
 
 const RULER = 26;
-const same = (a, b) => a && b && a.type === b.type && a.track === b.track && a.i === b.i && a.key === b.key && a.id === b.id;
 const KIND_LABEL = { audio: 'audio', stem: 'audio', bars: 'cancion', shots: 'tomas', auto: 'juego', moment: 'juego', fx: 'vista previa', light: 'luces',
   clip: 'juego', loop: 'juego', events: 'juego', note: 'juego', bandmoment: 'lectura', props: 'vista previa' };
 const editLayout = fn => { pushUndo(); fn(layout()); changed(); };
@@ -109,8 +111,8 @@ function TrackHead({ tr, g }) {
       const n = await ask('Notas de luces que van en esta pista (p. ej. 78 o 90-97, 101):', fmtNotes(tr.notes));
       if (n !== null) editLayout(() => { tr.notes = parseNotes(n); });
     } },
-    { label: 'Subir', icon: 'chev', disabled: ti === 0, run: () => move(-1) },
-    { label: 'Bajar', icon: 'chev', disabled: ti === g.tracks.length - 1, run: () => move(1) },
+    { label: 'Subir', icon: 'up', disabled: ti === 0, run: () => move(-1) },
+    { label: 'Bajar', icon: 'down', disabled: ti === g.tracks.length - 1, run: () => move(1) },
     '-', { title: 'Mover al grupo' },
     ...L.groups.filter(x => x !== g).map(x => ({ label: x.name, icon: x.icon || 'folder', run: () => toGroup(x) })),
     '-',
@@ -150,8 +152,8 @@ function GroupHead({ g, groups, count }) {
     ...Object.entries(USER_KINDS).map(([k, l]) => ({ label: { shots: 'Escena de camaras', fx: 'Pista de efectos', light: 'Pista de luces / fuego', props: 'Pista de objetos 3D' }[k] || l, icon: 'plus', run: () => addTrack(k) })),
     '-',
     { label: 'Renombrar grupo', icon: 'edit', run: async () => { const n = await ask('Nombre del grupo:', g.name); if (n) editLayout(() => { g.name = n; }); } },
-    { label: 'Subir grupo', icon: 'chev', disabled: gi === 0, run: () => move(-1) },
-    { label: 'Bajar grupo', icon: 'chev', disabled: gi === groups.length - 1, run: () => move(1) },
+    { label: 'Subir grupo', icon: 'up', disabled: gi === 0, run: () => move(-1) },
+    { label: 'Bajar grupo', icon: 'down', disabled: gi === groups.length - 1, run: () => move(1) },
     { label: 'Borrar grupo', icon: 'trash', danger: true, disabled: g.tracks.length > 0, run: () => editLayout(L => { L.groups.splice(gi, 1); }) },
   ];
   const toggle = () => { g.open = !g.open; emit('timeline'); };
@@ -173,14 +175,21 @@ function Item({ it, h, onDown, fresh }) {
   const ref = useRef();
   useEffect(() => { if (fresh) anime({ targets: ref.current, scaleY: [0.2, 1], opacity: [0, 1], duration: 380, easing: 'easeOutBack' }); }, []);
   const x = xOf(it.t) - HEAD, w = Math.max(it.len ? 4 : 3, it.len * S.zoom);
-  const sel = same(S.sel, it.sel);
+  const sel = it.sel && isSel(it.sel);
   return <div ref={ref} className={'it' + (sel ? ' sel' : '') + (it.len ? '' : ' pt') + (it.cls ? ' ' + it.cls : '')}
-    style={{ left: x + 'px', width: w + 'px', height: h - 8 + 'px', '--c': it.color }}
-    title={it.title || it.label} onPointerDown={e => onDown(e, it)}>
+    style={{ left: x + 'px', width: w + 'px', height: h - 8 + 'px', '--c': it.color }} data-sel={it.sel ? JSON.stringify(it.sel) : undefined}
+    title={it.title || it.label} onPointerDown={e => onDown(e, it)} onDoubleClick={e => openAnim(e, it)}>
     {w > 26 && <span>{it.label}</span>}{it.resize && w > 10 && <i className="grip"></i>}</div>;
 }
 
 const seen = new Set();   // bloques ya pintados (para animar solo los nuevos)
+
+// doble clic en una toma o un retoque: editor de animacion por keyframes
+function openAnim(e, it) {
+  const s = it.sel; if (!s) return;
+  if (s.type === 'shot') { const o = shotOf(s); if (o) { e.stopPropagation(); kfOpen(o); } }
+  else if (s.type === 'pose') { const o = layerOf(s); if (o) { e.stopPropagation(); kfOpenPose(o); } }
+}
 
 function TrackRow({ tr, g, groups, W, onItemDown, t0, t1 }) {
   const h = TRACK_H[tr.kind] || 30, lw = W - HEAD;
@@ -250,13 +259,13 @@ function Ruler({ W }) {
     const cv = ref.current, P = S.proj; if (!cv || !P) return;
     const w = W - HEAD, dpr = devicePixelRatio || 1; cv.width = Math.max(1, w * dpr); cv.height = RULER * dpr;
     const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, RULER);
-    c.font = '10px system-ui'; c.textBaseline = 'middle';
+    c.font = "500 10px 'JetBrains Mono Variable', ui-monospace, monospace"; c.textBaseline = 'middle';
     let lastX = -1e9; const t0 = msOf(HEAD), t1 = msOf(W);
     P.fretbars.forEach((b, i) => {
       if (b < t0 || b > t1) return;
       const x = xOf(b) - HEAD, bar = i % 4 === 0;
-      c.fillStyle = bar ? '#5c6578' : '#343a48'; c.fillRect(x, bar ? 12 : 19, 1, RULER);
-      if (bar && x - lastX > 58) { c.fillStyle = '#9aa3b5'; c.fillText(fmt(b).slice(0, -4) + `  · ${i / 4 + 1}`, x + 4, 7); lastX = x; }
+      c.fillStyle = bar ? '#4a525e' : '#2c323b'; c.fillRect(x, bar ? 12 : 19, 1, RULER);
+      if (bar && x - lastX > 58) { c.fillStyle = '#8a919c'; c.fillText(fmt(b).slice(0, -4) + `  ${i / 4 + 1}`, x + 4, 7); lastX = x; }
     });
   });
   return <canvas ref={ref} style={{ width: W - HEAD + 'px', height: RULER + 'px' }} />;
@@ -265,7 +274,7 @@ function Ruler({ W }) {
 // ---------- linea de tiempo ----------
 export function Timeline() {
   useBus('timeline', 'changed', 'song', 'inspector', 'audio');
-  const root = useRef(), grid = useRef(), drag = useRef(null);
+  const root = useRef(), grid = useRef(), drag = useRef(null), boxEl = useRef();
   const [W, setW] = useState(1000);
   useEffect(() => {
     const ro = new ResizeObserver(() => { setW(root.current.clientWidth); emit('timeline'); });
@@ -291,39 +300,81 @@ export function Timeline() {
     if (e.button !== 0) return;
     e.stopPropagation();
     if (!it.sel) return;
-    S.sel = it.sel; S.tab = { shot: 'cams', fx: 'fx', prop: 'props' }[it.sel.type] || 'insp';
-    emit('inspector'); emit('timeline');
+    // Ctrl o Mayus: anadir o quitar de la seleccion (sin arrastrar)
+    if (e.ctrlKey || e.metaKey || e.shiftKey) { toggleSel(it.sel); return; }
+    const group = isSel(it.sel) && selList().length > 1;
+    if (!group) setSelection([it.sel]);
+    else { S.sel = it.sel; emit('inspector'); emit('timeline'); }
+    S.tab = group ? 'insp' : { shot: 'cams', fx: 'fx', prop: 'props' }[it.sel.type] || 'insp';
+    emit('inspector');
     if (tr.lock) return;
     const [x] = local(e), x1 = xOf(it.t) + Math.max(4, it.len * S.zoom);
     pushUndo();
-    drag.current = { sel: it.sel, kind: tr.kind, edge: it.resize && x > x1 - 7, x0: x, t0: it.t, len0: it.len, moved: false };
+    const edge = it.resize && x > x1 - 7;
+    // arrastrando un elemento de un grupo se mueven todos (cada uno con su tiempo de partida)
+    const items = group && !edge ? movable().map(s => ({ s, t0: getT(s) })) : null;
+    drag.current = { sel: it.sel, kind: tr.kind, edge, x0: x, t0: it.t, len0: it.len, moved: false, items };
     root.current.setPointerCapture(e.pointerId);
   };
   const onDown = e => {
     if (!P || e.button !== 0) return;
-    const [x] = local(e); if (x < HEAD) return;
-    S.t = Math.max(0, msOf(x)); S.sel = null;
-    drag.current = { scrub: true }; root.current.setPointerCapture(e.pointerId);
+    const [x, y] = local(e); if (x < HEAD) return;
+    // Mayus o Ctrl + arrastrar en una zona vacia: seleccion por recuadro (en varias pistas a la vez)
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      drag.current = { box: true, x0: e.clientX, y0: e.clientY, add: true, base: selList() };
+      root.current.setPointerCapture(e.pointerId);
+      return;
+    }
+    S.t = Math.max(0, msOf(x)); S.sel = null; S.multi = null;
+    drag.current = { scrub: true, y }; root.current.setPointerCapture(e.pointerId);
     emit('inspector'); emit('timeline');
   };
+  const boxRect = (d, e) => ({ l: Math.min(d.x0, e.clientX), r: Math.max(d.x0, e.clientX), t: Math.min(d.y0, e.clientY), b: Math.max(d.y0, e.clientY) });
   const onMove = e => {
     const d = drag.current; if (!d || !P) return;
     const [x] = local(e);
     if (d.scrub) { S.t = Math.max(0, Math.min(P.length, msOf(x))); emit('timeline'); return; }
+    if (d.box) {
+      const b = boxRect(d, e), r = root.current.getBoundingClientRect(), el = boxEl.current;
+      if (el) Object.assign(el.style, { display: 'block', left: b.l - r.left + 'px', top: b.t - r.top + 'px', width: b.r - b.l + 'px', height: b.b - b.t + 'px' });
+      return;
+    }
     if (Math.abs(x - d.x0) > 2) d.moved = true;
-    // arrastrar en vertical a otra subpista del mismo tipo (tomas, efectos, objetos)
-    const row = document.elementFromPoint(e.clientX, e.clientY)?.closest('.trk');
-    if (row && row.dataset.kind === d.kind && ['shots', 'fx', 'props'].includes(d.kind)) {
-      const obj = d.sel.type === 'shot' ? shotOf(d.sel) : d.sel.type === 'fx' ? fxOf(d.sel) : propOf(d.sel);
-      if (obj && obj.track !== row.dataset.track) { obj.track = row.dataset.track; d.moved = true; }
+    // arrastrar en vertical a otra subpista del mismo tipo (tomas, efectos, objetos, retoques); solo un elemento
+    const row = !d.items && document.elementFromPoint(e.clientX, e.clientY)?.closest('.trk');
+    if (row && row.dataset.kind === d.kind && ['shots', 'fx', 'props', 'pose'].includes(d.kind)) {
+      const obj = d.sel.type === 'shot' ? shotOf(d.sel) : d.sel.type === 'fx' ? fxOf(d.sel) : d.sel.type === 'pose' ? layerOf(d.sel) : propOf(d.sel);
+      if (obj && obj.track !== row.dataset.track) {
+        obj.track = row.dataset.track; d.moved = true;
+        // un retoque llevado a la pista de otro musico pasa a ser suyo (las claves son giros por hueso: valen igual)
+        if (d.sel.type === 'pose') { const t = layout().groups.flatMap(g => g.tracks).find(t => t.id === row.dataset.track); if (t?.role) obj.role = t.role; }
+      }
     }
     if (!d.moved) return;
     const dt = (x - d.x0) / S.zoom;
-    if (d.edge) setLen(d.sel, d.len0 + dt); else setT(d.sel, snapT(d.t0 + dt, e.altKey));
+    if (d.edge) setLen(d.sel, d.len0 + dt);
+    else if (d.items) {
+      // el elemento agarrado se pega a los pulsos; el resto se mueve lo mismo
+      const delta = snapT(d.t0 + dt, e.altKey) - d.t0, minT = Math.min(...d.items.map(o => o.t0));
+      const dd = Math.max(-minT, delta);
+      for (const o of d.items) setT(o.s, Math.round(o.t0 + dd));
+    } else setT(d.sel, snapT(d.t0 + dt, e.altKey));
     S.ver++; emit('timeline');
   };
-  const onUp = () => {
-    const d = drag.current; drag.current = null; if (!d || d.scrub) return;
+  const onUp = e => {
+    const d = drag.current; drag.current = null; if (!d) return;
+    if (d.scrub) return;
+    if (d.box) {
+      if (boxEl.current) boxEl.current.style.display = 'none';
+      const b = boxRect(d, e);
+      if (b.r - b.l < 3 && b.b - b.t < 3) return;
+      const hit = [...root.current.querySelectorAll('.it[data-sel]')].filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.right >= b.l && r.left <= b.r && r.bottom >= b.t && r.top <= b.b && !el.closest('.trk.off');
+      }).map(el => JSON.parse(el.dataset.sel));
+      setSelection([...d.base, ...hit]);
+      return;
+    }
     if (d.moved) changed(); else dropUndo();
   };
   const onDbl = e => {
@@ -358,6 +409,7 @@ export function Timeline() {
   const allOpen = groups.every(g => g.open);
   return <div id="tlScroll" className="tl" ref={root} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onDbl}>
     <canvas className="tlGrid" ref={grid} style={{ width: W + 'px' }}></canvas>
+    <div className="tlMarquee" ref={boxEl} />
     <div className="ruler" style={{ height: RULER + 'px' }}>
       <div className="rhead" style={{ width: HEAD + 'px' }} onPointerDown={e => e.stopPropagation()}>
         <button className="tb" title={allOpen ? 'Plegar todos los grupos' : 'Desplegar todos'} onClick={() => { groups.forEach(g => { g.open = !allOpen; }); emit('timeline'); }}>

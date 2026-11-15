@@ -56,6 +56,14 @@ bool MainCamera(uint32_t& addr);
 bool StripCamera(int i, float p[3], float side[3], float U[3], float F[3], float& hfov_raw);
 std::vector<FxState> ActiveFxNow();
 double SongMsNow();
+// true si hay una cancion sonando de verdad (reloj en marcha; no menu ni pausa)
+bool SongPlaying();
+// Vuelve a poner en la camara del escenario la pose que calculo UpdateGameCamera en este frame (si hay toma o efecto
+// de camara). Se llama desde varios puntos del bucle del motor; `point` solo sirve para las estadisticas del registro.
+void ReapplyCamera(uint8_t* base, int point);
+// Una funcion del motor que escribe camaras (de_hooks.cpp) acaba de terminar con `obj` = su r3 de entrada: si es la
+// camara del escenario y hay toma del editor, se vuelve a poner la nuestra al instante. `fn` = indice para el registro.
+void OnEngineCamWrite(uint8_t* base, uint32_t obj, int fn);
 
 // Objetos NATIVOS activos ahora (los crea el motor: luces, particulas, modelos del juego). false = sin reloj.
 struct NativeItem { int id; std::string kind; float p[3], q[4], rgb[3], v[3]; std::string asset; };

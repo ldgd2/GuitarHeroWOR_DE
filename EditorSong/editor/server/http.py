@@ -105,7 +105,8 @@ class Handler(BaseHTTPRequestHandler):
         f = (WEB / rel).resolve()
         if not f.is_relative_to(WEB.resolve()) or not f.is_file():
             return self._send(404, b"no encontrado", "text/plain")
-        ctype = "text/javascript" if f.suffix == ".js" else (mimetypes.guess_type(f.name)[0] or "application/octet-stream")
+        ctype = ("text/javascript" if f.suffix == ".js" else "application/wasm" if f.suffix == ".wasm"
+                 else (mimetypes.guess_type(f.name)[0] or "application/octet-stream"))
         self._send(200, f.read_bytes(), ctype)
 
     def do_GET(self):
@@ -116,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(port: int) -> ThreadingHTTPServer:
-    from . import routes_assets, routes_band, routes_song, routes_stage, routes_system  # noqa: F401  (registran rutas)
+    from . import routes_assets, routes_band, routes_capture, routes_song, routes_stage, routes_system  # noqa: F401  (registran rutas)
     # sin SO_REUSEADDR: en Windows deja que DOS servidores escuchen en el mismo puerto y el navegador acaba hablando
     # con el viejo. Asi, si el editor ya esta abierto, este falla y lo dice.
     class Server(ThreadingHTTPServer):

@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // de_hooks.cpp - Hooks de la Definitive Edition (solo observan, no alteran).
 // Cada hook llama a la funcion ORIGINAL con los mismos argumentos y devuelve
 // el mismo resultado; solo registra informacion para el panel DE (F8 por defecto).
@@ -13,10 +13,18 @@
 #include <cstring>
 #include <string>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "core/crash_handler.hpp"
 #include "de/de_config.hpp"
 #include "de/edfx.hpp"
+#include "de/render_sandbox.hpp"
+#include "de/cam_watch.hpp"
 #include "de/mod_manager.hpp"
+#include "de/qb_bridge.hpp"
+#include "de/gfx_options.hpp"
 #include "generated/re_wor_pch.h"
 
 namespace re_wor::de {
@@ -144,6 +152,36 @@ extern "C" REX_FUNC(sub_8272E6F0) {
   }
 }
 
+// Bucle principal del motor (sub_823F2A88): 8242AD60 (tiempo/espera al render) -> ... -> 823F2710 (tareas: scripts,
+// camaras...) -> ... -> 82434D40 (cierre del frame). La camara de las tomas del editor se calcula tras 8242AD60, pero
+// el motor la recalcula despues en sus tareas: se vuelve a poner tras 823F2710 y antes de 82434D40 (y de 8242AD60).
+extern "C" void __imp__sub_823F2710(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_823F2710) {
+  __imp__sub_823F2710(ctx, base);
+  re_wor::de::edfx::ReapplyCamera(base, 0);
+}
+extern "C" void __imp__sub_82434D40(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_82434D40) {
+  re_wor::de::edfx::ReapplyCamera(base, 1);
+  __imp__sub_82434D40(ctx, base);
+}
+
+// Funciones del motor que escriben los campos de camara (pos +112, lado +128, up +144, at +160, fov +192) sobre su
+// r3: se encontraron buscando en el codigo recompilado las que guardan floats en esos desplazamientos. Al terminar,
+// si lo escrito era la camara del escenario y hay toma del editor, se vuelve a poner la nuestra.
+#define REWOR_CAM_WRITER(addr, idx)                                         extern "C" void __imp__sub_##addr(PPCContext& __restrict ctx, uint8_t* base);   extern "C" REX_FUNC(sub_##addr) {                                           const uint32_t obj = ctx.r3.u32;                                          __imp__sub_##addr(ctx, base);                                             re_wor::de::edfx::OnEngineCamWrite(base, obj, idx);                     }
+REWOR_CAM_WRITER(8222F888, 0)
+REWOR_CAM_WRITER(8222F938, 1)
+REWOR_CAM_WRITER(8222FEA0, 2)
+REWOR_CAM_WRITER(82246538, 3)
+REWOR_CAM_WRITER(822468B0, 4)
+REWOR_CAM_WRITER(82248320, 5)
+REWOR_CAM_WRITER(8245C728, 6)
+REWOR_CAM_WRITER(8246A278, 7)
+REWOR_CAM_WRITER(825E53A0, 8)
+REWOR_CAM_WRITER(826F49E8, 9)
+#undef REWOR_CAM_WRITER
+
 // Frame LOGICO del motor (espera al hilo de render, mide dt con
 // KeQueryPerformanceCounter y lo guarda en 0x829BB2E0 como double).
 extern "C" void __imp__sub_8242AD60(PPCContext& __restrict ctx, uint8_t* base);
@@ -158,6 +196,7 @@ extern "C" REX_FUNC(sub_8242AD60) {
   auto t0 = clock::now();
   double wall_ms = std::chrono::duration<double, std::milli>(t0 - s_prev).count();
   s_prev = t0;
+  re_wor::de::edfx::ReapplyCamera(base, 2);   // antes de la espera al hilo de render
   __imp__sub_8242AD60(ctx, base);
   re_wor::de::OnLogicFrameExtras(ctx, base);
 
@@ -275,9 +314,64 @@ REWOR_MOVIE_HOOK(8251E210, 1)  // WaitForAllMoviesToFinish -> no espera
 REWOR_MOVIE_HOOK(8251D678, 1)  // WaitForMovieLoop -> no espera
 #undef REWOR_MOVIE_HOOK
 
+// Hook defensivo de memcpy (sub_826AC5F0):
+// Protege contra desreferencias nulas si una rutina del motor pasa dest=0 o src=0.
+// Evita el crash fatal (Exception 0xc0000005 WRITE a 0x100000000).
+extern "C" void __imp__sub_826AC5F0(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_826AC5F0) {
+  if (ctx.r3.u32 == 0 || ctx.r4.u32 == 0 || ctx.r5.u32 == 0) {
+    return;
+  }
+#ifdef _WIN32
+  __try {
+    __imp__sub_826AC5F0(ctx, base);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+#else
+  __imp__sub_826AC5F0(ctx, base);
+#endif
+}
+
+// Hook de sub_82400540 (recorre una lista de eventos de la cancion hasta el centinela 0x2CB3EF3B y devuelve
+// cuantos proceso). sub_824013B0 le pasa como lista 16(objeto), que es NULL si la cancion se arranca sin la
+// preparacion normal (p. ej. desde el menu de depuracion de Neversoft): leia la direccion 0 del juego
+// (0x100000000 en el PC) y el juego se cerraba. Sin lista no hay eventos: se devuelve 0.
+extern "C" void __imp__sub_82400540(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_82400540) {
+  if (ctx.r4.u32 == 0) {
+    static std::atomic<int> s_logged{0};
+    if (s_logged++ < 3) TRACE("[Guard] sub_82400540 con lista de eventos nula: ignorada");
+    ctx.r3.u64 = 0;
+    return;
+  }
+  __imp__sub_82400540(ctx, base);
+}
+
+// Hook de sub_823C6F20 (SetScreenElementProps / LegacyDoScreenElementMorph):
+// En el codigo original de Neversoft, si sub_823CE160 no encuentra el elemento en pantalla,
+// devuelve NULL (0), pero sub_823C6F20 intenta leer la vtable de r3 sin comprobar NULL (0x100000000).
+// Esta proteccion captura la excepcion y evita que el juego caiga ante elementos no encontrados.
+extern "C" void __imp__sub_823C6F20(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_823C6F20) {
+#ifdef _WIN32
+  __try {
+    __imp__sub_823C6F20(ctx, base);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    ctx.r3.s64 = 0;
+  }
+#else
+  __imp__sub_823C6F20(ctx, base);
+#endif
+}
+
 namespace re_wor::de {
+bool BootDone() { return g_boot_done.load(); }
+
 // desde el frame logico (hilo del juego): parar los videos pendientes y leer el reloj de la cancion
 void OnLogicFrameExtras(PPCContext& ctx, uint8_t* base) {
+  if (Get().dev.auto_skip_intro && !g_boot_done && !g_skip_armed && !g_movie_seen) {
+    RequestSkipIntro();
+  }
   const int64_t kill_at = g_kill_at.load();
   if (kill_at && NowMs() >= kill_at) {
     g_kill_at = 0;
@@ -287,7 +381,11 @@ void OnLogicFrameExtras(PPCContext& ctx, uint8_t* base) {
     TRACE("[SkipIntro] videos parados");
   }
   edfx::OnLogicFrame(base);
-  nativefx::Tick(ctx, base);   // filtros del editor con el ScreenFX del motor (solo el escenario)
+  nativefx::Tick(ctx, base);
+  sandbox::OnLogicFrame();
+  camwatch::Tick();   // vigia de la camara (diagnostico, una vez)
+  qb_bridge::OnLogicFrame(ctx, base);
+  SyncGameMenu(base);   // Options > Graphics del juego <-> [graphics]
 }
 }  // namespace re_wor::de
 #endif

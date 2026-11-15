@@ -46,23 +46,36 @@ class Workspace:
     def save_settings(self, data: dict) -> None:
         self.settings_path.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
 
+    # Las carpetas dentro del repo se guardan RELATIVAS a la raiz ("song"), para que settings.json sirva en
+    # cualquier PC; las de fuera (Descargas, otro disco...) se guardan tal cual.
+    def _rel(self, folder: Path) -> str:
+        folder = Path(folder)
+        try:
+            return folder.resolve().relative_to(self.root.resolve()).as_posix()
+        except ValueError:
+            return str(folder)
+
+    def _abs(self, p: str) -> Path:
+        q = Path(p)
+        return q if q.is_absolute() else self.root / q
+
     def song_sources(self) -> list[Path]:
         """Carpetas donde se buscan canciones custom de WTDE (por defecto GuitarHeroWOR_DE/song)."""
-        src = self.settings().get("song_sources") or [str(self.root / "song")]
-        return [Path(p) for p in src]
+        src = self.settings().get("song_sources") or ["song"]
+        return [self._abs(p) for p in src]
 
     def add_song_source(self, folder: Path) -> None:
         s = self.settings()
-        src = s.get("song_sources") or [str(self.root / "song")]
-        if str(folder) not in src:
-            src.append(str(folder))
+        src = [self._rel(self._abs(p)) for p in (s.get("song_sources") or ["song"])]
+        if self._rel(folder) not in src:
+            src.append(self._rel(folder))
         s["song_sources"] = src
         self.save_settings(s)
 
     def remove_song_source(self, folder: Path) -> None:
         s = self.settings()
-        src = [p for p in (s.get("song_sources") or [str(self.root / "song")]) if Path(p) != Path(folder)]
-        s["song_sources"] = src
+        src = [self._rel(self._abs(p)) for p in (s.get("song_sources") or ["song"])]
+        s["song_sources"] = [p for p in src if self._abs(p).resolve() != Path(folder).resolve()]
         self.save_settings(s)
 
     def check(self) -> list[str]:

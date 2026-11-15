@@ -19,4 +19,7 @@ void SetTraceProbes(bool enabled);  // FPS/audio/reloj al trace cada 2 s
 // (logo_intro.bik...) y hace que los scripts de arranque los den por terminados. Solo antes del menu.
 void RequestSkipIntro();
 
+// true cuando el juego ya llego al menu principal (se cargo band_lobby)
+bool BootDone();
+
 }  // namespace re_wor::de

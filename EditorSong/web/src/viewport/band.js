@@ -18,6 +18,10 @@ import { handsOnGuitar } from './hands.js';
 import { applySkin, DEFAULT_SKIN } from './skin.js';
 import { prepareIK, solveIK } from './ik.js';
 import { editCam, editorOnly, onFrame, scene, view } from './scene.js';
+import { applyCapture } from '../rig/apply.js';
+import { prepareFace } from '../rig/faceRig.js';
+import { placeIkTargets, prepareBody } from '../rig/bodyRig.js';
+import { applyPoseLayers } from '../rig/poseLayer.js';
 import { applyTextures, loader, nodePos, nodeQuat } from './venue.js';
 
 const BASE_POSE = { drummer: 'drum_s1t3' };          // pose sobre la que se suman las capas aditivas
@@ -47,11 +51,12 @@ function load(role) {
     applySkin(gltf.scene, band[role]?.skin || DEFAULT_SKIN);
     Object.assign(c, { root: gltf.scene, bones, gender: spec.gender,
       bindQ: bones.map(b => b?.quaternion.clone()), bindP: bones.map(b => b?.position.clone()) });
-    prepareIK(c);
+    prepareIK(c); prepareFace(c); prepareBody(c);
     group.add(c.root); info[role] = '';
   }, undefined, err => { if (c.url === url) info[role] = 'error al cargar: ' + (err.message || err); });
 }
 export const loadBand = () => ROLES.forEach(load);
+export const charOf = role => chars[role];
 // posicion actual (mundo) de un hueso por su nombre del juego (Bone_Chest, Bone_Head...), para las camaras
 export function boneWorld(role, name) {
   const c = chars[role]; if (!c?.bones) return null;
@@ -70,6 +75,7 @@ let down = null;
 view.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
 view.addEventListener('pointerup', e => {
   if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || e.button !== 0) return;
+  if (document.body.classList.contains('kfMode')) return;   // el editor de animacion usa los clics de la vista
   const r = view.getBoundingClientRect();
   ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), editCam);
   // las mallas con piel no se intersectan bien con su pose animada: se usa una capsula por musico
@@ -189,38 +195,49 @@ function prefetch() {
   }
 }
 
+// Pose de un musico en t: animacion (+ base aditiva), IK, manos a la guitarra, captura y retoques de pose.
+// Devuelve {p, baseName, waiting}. blendDt: segundos para el fundido entre animaciones (null = sin fundido).
+function poseRole(role, c, t, blendDt) {
+  const p = pick(role, t, c);
+  c.root.position.copy(nodePos(p?.node || role));
+  c.root.quaternion.copy(nodeQuat(p?.node || role));
+  let d = p ? getAnim(p.src, p.id) : null;
+  if (d?.error) { p.name += ' (no encontrada)'; d = null; }
+  const baseName = (d?.additive || role === 'drummer') && BASE_POSE[role];
+  let base = baseName ? getAnim('loop', animId(baseName)) : null;
+  if (base?.error) base = null;
+  const waiting = (p && !d && !p.name.includes('(')) || (baseName && !base);
+  if (!waiting) {            // mientras carga la siguiente animacion se mantiene la pose anterior
+    if (blendDt != null) {
+      const key = (p?.id || '') + (p?.node || '') + (p?.inst ?? '');   // cada clip es una instancia (aunque repita animacion)
+      if (c.cur !== undefined && c.cur !== key) startBlend(c);
+      c.cur = key;
+    }
+    pose(c, base, d, p?.lt || 0, p?.loop);
+    if (blendDt != null) blend(c, blendDt);
+    // la bateria trae los brazos animados: solo se cierran las piernas (pies al suelo/pedales)
+    const tr = tracksOf(base, d);
+    c.ik = solveIK(c, tr, VIEW.ik, role === 'drummer' ? [2, 3] : null);
+    // guitarra y bajo: manos al instrumento con las poses de trastes/rasgueo del juego (bucles y clips de guitarra)
+    if (VIEW.ik && (role === 'guitarist' || role === 'bassist') && (p?.hands === 'guitar' || p?.loop)) {
+      const hn = handsOnGuitar(c, role, blendDt ?? 0);
+      if (hn) c.ik += hn;
+      else if (p?.hands === 'guitar' && handsToGuitar(c)) c.ik += solveIK(c, { ...tr, hasRot: () => false }, true, [0, 1]);
+    }
+    if (blendDt != null) applyCapture(role, c);   // captura del movil: cuerpo, cabeza y rostro (rig del juego)
+    applyPoseLayers(role, c, t);                   // retoques de pose (claves por hueso encima de todo)
+  }
+  return { p, baseName, waiting, d, base };
+}
+
 function update(dt) {
   if ((prefetchT -= dt) <= 0) { prefetchT = 0.4; prefetch(); }
   group.visible = VIEW.band;
   if (!VIEW.band) return;
   for (const role of ROLES) {
     const c = chars[role]; if (!c?.root) continue;
-    const p = pick(role, S.t, c);
+    const { p, baseName, waiting } = poseRole(role, c, S.t, dt);
     if (window.__band) (window.__band.dbg ||= {})[role] = p && `${p.name} lt=${p.lt.toFixed(3)} node=${p.node}`;
-    c.root.position.copy(nodePos(p?.node || role));
-    c.root.quaternion.copy(nodeQuat(p?.node || role));
-    let d = p ? getAnim(p.src, p.id) : null;
-    if (d?.error) { p.name += ' (no encontrada)'; d = null; }
-    const baseName = (d?.additive || role === 'drummer') && BASE_POSE[role];
-    let base = baseName ? getAnim('loop', animId(baseName)) : null;
-    if (base?.error) base = null;
-    const waiting = (p && !d && !p.name.includes('(')) || (baseName && !base);
-    if (!waiting) {            // mientras carga la siguiente animacion se mantiene la pose anterior
-      const key = (p?.id || '') + (p?.node || '') + (p?.inst ?? '');   // cada clip es una instancia (aunque repita animacion)
-      if (c.cur !== undefined && c.cur !== key) startBlend(c);
-      c.cur = key;
-      pose(c, base, d, p?.lt || 0, p?.loop);
-      blend(c, dt);
-      // la bateria trae los brazos animados: solo se cierran las piernas (pies al suelo/pedales)
-      const tr = tracksOf(base, d);
-      c.ik = solveIK(c, tr, VIEW.ik, role === 'drummer' ? [2, 3] : null);
-      // guitarra y bajo: manos al instrumento con las poses de trastes/rasgueo del juego (bucles y clips de guitarra)
-      if (VIEW.ik && (role === 'guitarist' || role === 'bassist') && (p?.hands === 'guitar' || p?.loop)) {
-        const hn = handsOnGuitar(c, role, dt);
-        if (hn) c.ik += hn;
-        else if (p?.hands === 'guitar' && handsToGuitar(c)) c.ik += solveIK(c, { ...tr, hasRot: () => false }, true, [0, 1]);
-      }
-    }
     if (VIEW.skeleton && !c.skel) { c.skel = new THREE.SkeletonHelper(c.root); scene.add(c.skel); editorOnly.add(c.skel); }
     if (c.skel) c.skel.visible = VIEW.skeleton;
     if (!(info[role] || '').startsWith('cargando modelo'))
@@ -230,6 +247,43 @@ function update(dt) {
     infoTick = 0;
     $('bandInfo').innerHTML = ROLES.filter(r => chars[r]).map(r => `<div><b>${ROLE_ES[r]}</b> ${info[r] || ''}${chars[r].ik ? ` <span class="muted">IK ${chars[r].ik}</span>` : ''}</div>`).join('');
   }
+}
+
+// ---- horneado para exportar: n fotogramas a 30/s desde t0 -> {hueso: {q: [...], p: [...] | null}} locales ----
+// Es la misma pose que se ve en el visor (sin fundidos ni captura en vivo). Antes de empezar espera a que esten
+// descargadas todas las animaciones del tramo. Los objetivos de IK (93/94 pies, 126/127 manos) se colocan donde
+// quedan manos y pies, asi el IK del motor reproduce brazos y piernas.
+const waitAnims = async (list, ms = 20000) => {
+  const t0 = performance.now();
+  for (;;) {
+    if (list.every(([src, id]) => getAnim(src, id) !== null)) return true;
+    if (performance.now() - t0 > ms) return false;
+    await new Promise(r => setTimeout(r, 60));
+  }
+};
+export async function bakeRole(role, t0, n, bones, posBones) {
+  const c = chars[role]; if (!c?.root) throw new Error(`el modelo de ${ROLE_ES[role]} no esta cargado`);
+  const need = [];
+  for (let i = 0; i < n; i += 5) {
+    const p = pick(role, t0 + i * 1000 / 30, c);
+    if (p) need.push([p.src, p.id]);
+  }
+  if (BASE_POSE[role]) need.push(['loop', animId(BASE_POSE[role])]);
+  if (!await waitAnims(need)) throw new Error('las animaciones del tramo no terminan de cargar');
+  const out = {}, pos = new Set(posBones);
+  for (let i = 0; i < n; i++) {
+    poseRole(role, c, t0 + i * 1000 / 30, null);
+    c.root.updateMatrixWorld(true);
+    placeIkTargets(c);
+    for (const j of bones) {
+      const b = c.bones[j]; if (!b) continue;
+      const o = (out[j] ||= { q: [], p: pos.has(j) ? [] : null });
+      o.q.push(+b.quaternion.x.toFixed(6), +b.quaternion.y.toFixed(6), +b.quaternion.z.toFixed(6), +b.quaternion.w.toFixed(6));
+      if (o.p) { const bp = c.bindP[j]; o.p.push(+(b.position.x - bp.x).toFixed(6), +(b.position.y - bp.y).toFixed(6), +(b.position.z - bp.z).toFixed(6)); }
+    }
+  }
+  c.cur = undefined;   // el siguiente fotograma del visor vuelve a posar sin fundido raro
+  return out;
 }
 onFrame(update);
 if (new URLSearchParams(location.search).has('debug')) window.__band = { chars, S, update, scene, editCam, THREE };   // pruebas automaticas

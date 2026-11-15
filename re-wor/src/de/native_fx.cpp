@@ -36,6 +36,7 @@
 
 #include "core/crash_handler.hpp"
 #include "de/edfx.hpp"
+#include "de/render_sandbox.hpp"
 #include "generated/re_wor_pch.h"
 
 extern "C" void sub_825090D0(PPCContext& __restrict ctx, uint8_t* base);  // ScreenFX_AddFXInstance
@@ -811,6 +812,29 @@ void Tick(PPCContext& ctx, uint8_t* base) {
   const auto fx = edfx::ActiveFxNow();
   TickSplit(ctx, base, fx, stage_node);
   if (!has_stage) return;
+
+  // SANDBOX DE RENDER: el motor solo dibuja un bright_Sat neutro (el marcador); los efectos los pinta la pasada
+  // propia justo despues (render_sandbox.cpp). Si la pasada no llega, se sigue con el camino de siempre.
+  const sandbox::NativeMode smode = sandbox::Mode();
+  if (smode == sandbox::NativeMode::kMarkerOnly || smode == sandbox::NativeMode::kAllOff ||
+      (smode == sandbox::NativeMode::kSandbox && (sandbox::DrawsImage() || fx.empty()))) {
+    if (g_faults.load() > 8) return;
+    TickLetterbox(base, {});
+    const bool marker = false;   // el sandbox ya no necesita el filtro marcador
+    Send(ctx, base, g_bs, marker, [&](Params& p) {
+      p.Float(k_target, 0.25f);
+      p.Float(k_saturation, 1.f);
+      p.Float(k_brightness, 1.f);
+      p.Float(k_contrast, 1.f);
+      p.Float(QbKey("hue"), 1.f);
+      p.FArr(QbKey("red_mix"), {1.f, 0.f, 0.f, 0.f});
+      p.FArr(QbKey("green_mix"), {0.f, 1.f, 0.f, 0.f});
+      p.FArr(QbKey("blue_mix"), {0.f, 0.f, 1.f, 0.f});
+    });
+    auto off = [](Params&) {};
+    for (Inst* in : {&g_vig, &g_dof, &g_bloom, &g_noise, &g_mblur, &g_fish, &g_god, &g_conv}) Send(ctx, base, *in, false, off);
+    return;
+  }
   TickLetterbox(base, fx);
 
   const bool any_live = g_bs.active || g_vig.active || g_dof.active || g_bloom.active || g_noise.active ||

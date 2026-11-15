@@ -3,11 +3,11 @@ import { api, emit, S } from '../../core/state.js';
 import { addProp, NATIVE_PROPS, PROP_KINDS, setGizmoMode } from '../../viewport/props.js';
 import { GAME_MODELS, HOUSINGS, PFX_ALL, PFX_FAV } from '../../camera/native_catalog.js';
 import { deleteSel } from '../../timeline/edit.js';
-import { useRef, useState  } from '../react.jsx';
+import { Icon, useRef, useState } from '../react.jsx';
 import { Card, Check, edit, Field, Note, Num, Text } from '../components/fields.jsx';
 import { toast } from '../overlay.js';
 
-const ICON = { box: '▣', sphere: '●', cylinder: '▮', plane: '▭', screen: '🖵', text: 'T', spot: '💡', pyro: '🔥', glb: '📦', particles: '✨', gamemodel: '🧍' };
+const ICON = { box: 'box', sphere: 'sphere', cylinder: 'cylinder', plane: 'plane', screen: 'screen', text: 'text', spot: 'spotlight', pyro: 'fire', glb: 'package', particles: 'particles', gamemodel: 'model' };
 const favIds = new Set(PFX_FAV.map(x => x.id));
 const Vec = ({ label, v, onCommit, step = 0.1 }) => (<Field label={label}><div className="vec">
   {[0, 1, 2].map(i => (<Num key={i} value={v[i]} step={step} onCommit={x => { const n = [...v]; n[i] = x; onCommit(n); }} />))}</div></Field>);
@@ -16,12 +16,12 @@ function PropEditor({ p }) {
   const [mode, setMode] = useState('translate');
   const m = k => { setMode(k); setGizmoMode(k); };
   return (<div className="fade">
-    <h3>{ICON[p.kind]} {p.name}</h3>
+    <h3 className="withIco"><Icon n={ICON[p.kind]} s={18} />{p.name}</h3>
     <div className="seg">{[['translate', 'Mover'], ['rotate', 'Girar'], ['scale', 'Escalar']].map(([k, l]) =>
       (<button key={k} className={mode === k ? 'on' : ''} onClick={() => m(k)}>{l}</button>))}</div>
     <p className="muted small">Arrastra las flechas del objeto en la vista 3D, o escribe los valores.</p>
     <Field label="Nombre"><Text value={p.name} onCommit={edit(v => { p.name = v; })} /></Field>
-    {NATIVE_PROPS.has(p.kind) && (<p className="small" style={{ color: '#6be675' }}>Nativo: lo crea el propio motor del juego.</p>)}
+    {NATIVE_PROPS.has(p.kind) && (<p className="okc small">Nativo: lo crea el propio motor del juego.</p>)}
     {p.kind === 'text' && (<Field label="Texto"><Text value={p.text} onCommit={edit(v => { p.text = v; })} /></Field>)}
     {p.kind === 'particles' && (<Field label="Efecto"><select value={p.pfx} onChange={edit(e => { p.pfx = e.target.value; })}>
       <optgroup label="Destacados">{PFX_FAV.map(x => (<option key={x.id} value={x.id}>{x.label}</option>))}</optgroup>
@@ -67,7 +67,7 @@ export function PropsPanel() {
     {sel && (<Card><PropEditor key={sel.id} p={sel} /></Card>)}
     <Card title="Anadir objeto">
       <div className="presetGrid">{Object.entries(PROP_KINDS).map(([k, l]) => (<button key={k} className="preset"
-        onClick={() => (k === 'glb' ? file.current.click() : addProp(k))}><b>{ICON[k]}</b><span>{l}</span></button>))}</div>
+        onClick={() => (k === 'glb' ? file.current.click() : addProp(k))}><b><Icon n={ICON[k]} s={20} /></b><span>{l}</span></button>))}</div>
       <input ref={file} type="file" accept=".glb" hidden onChange={e => { const f = e.target.files[0]; e.target.value = ''; upload(f); }} />
       <Note><b>Nativos</b> (los crea el motor del juego): foco de luz con haz volumetrico, columna de fuego, particulas del juego
         (292: chispas, fuego, humo, confeti, fuegos artificiales, electricidad...) y modelos del juego. El resto (cajas, textos,
@@ -76,7 +76,7 @@ export function PropsPanel() {
     <Card title={`Objetos (${list.length})`}>
       {list.length ? (<ul className="list">{list.map(p => (<li key={p.id} className={sel?.id === p.id ? 'on' : ''}
           onClick={() => { S.sel = { type: 'prop', id: p.id }; emit('inspector'); }}>
-          <b>{ICON[p.kind]}</b><span>{p.name}</span>{p.visible === false && (<span className="muted">oculto</span>)}</li>))}</ul>)
+          <b><Icon n={ICON[p.kind]} s={16} /></b><span>{p.name}</span>{p.visible === false && (<span className="muted">oculto</span>)}</li>))}</ul>)
         : (<p className="muted small">Sin objetos todavia.</p>)}
     </Card>
   </div>);

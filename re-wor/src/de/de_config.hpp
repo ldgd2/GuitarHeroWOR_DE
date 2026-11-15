@@ -53,12 +53,50 @@ struct ModEntryConfig {
 struct DevConfig {
   bool log_file_opens = false;  // registrar cada archivo abierto (re_wor_trace.log)
   bool show_fps = false;
+  bool debug_build = false;     // Forzar DebugBuild() = 1 en scripts Neversoft
+  bool auto_skip_intro = true;  // Saltar legal/intro automaticamente sin pulsar F
+  bool uncapped_fps = false;    // Desbloquear limite de 60 FPS
+  int target_refresh_rate = 0;  // 0 = auto/vsync, 60, 120, 144, 240
+  int bridge_port = 8770;       // puente de desarrollo por TCP en 127.0.0.1 (0 = apagado); clave en dev_bridge.json
 };
 
 // Rendimiento (seccion [performance]).
 struct PerfConfig {
   bool trace_probes = false;   // escribir FPS/audio/reloj en el trace cada 2 s (diagnostico)
   bool above_normal_priority = true;  // prioridad "por encima de lo normal" para el proceso
+};
+
+// Configuracion grafica y traduccion (seccion [graphics]).
+struct GraphicsConfig {
+  std::string backend = "d3d12";            // backend GPU: "d3d12"
+  std::string render_target_path = "rtv";   // "rtv" (Hardware ROP - rapido para Nvidia/AMD/Intel y patatas), "rov"
+  int resolution_scale = 1;                 // 1 = 720p (ligero/patatas), 2 = 1440p/4K (high-end)
+  int texture_cache_mb = 1024;              // limite de textura (MB) para evitar tirones
+  bool async_pipeline_compile = true;       // compilar shaders en hilos paralelos
+  // Pantalla (cvars del SDK; se aplican al arrancar)
+  std::string resolution;                   // "" = la del escritorio/ventana, "720p", "1080p", "1440p", "4k"
+  int window_mode = 1;                      // 0 ventana, 1 pantalla completa sin bordes, 2 pantalla completa exclusiva
+  int refresh_hz = 60;                      // VBlank del juego (video_mode_refresh_rate): 60 = como en la consola
+  std::string upscale = "bilinear";         // salida: "bilinear", "cas" (nitidez AMD) o "fsr" (AMD FSR 1)
+  float sharpness = 0.0f;                   // 0..1 nitidez extra de CAS/FSR
+  bool msaa2x = true;                       // MSAA 2x nativo del Xenos
+  bool letterbox = true;                    // franjas si la ventana no es 16:9
+  bool vsync = false;                       // VSync del monitor (present_vsync; al momento)
+  bool show_fps = false;                    // contador de FPS en una esquina (al momento)
+  // Imagen: post-proceso propio en la pasada sandbox, solo el escenario (la autopista y el HUD no se tocan)
+  float bloom = 0.0f;                       // 0..1 resplandor de las luces fuertes
+  float glow = 0.0f;                        // 0..1 resplandor suave (umbral bajo)
+  float brightness = 0.0f;                  // -1..1
+  float contrast = 0.0f;                    // -1..1
+  float saturation = 0.0f;                  // -1..1
+  float vignette = 0.0f;                    // 0..1
+  float grain = 0.0f;                       // 0..1 grano de pelicula
+  float blur = 0.0f;                        // 0..1 desenfoque suave del escenario
+  bool LookActive() const {
+    return bloom > 0.001f || glow > 0.001f || vignette > 0.001f || grain > 0.001f || blur > 0.001f ||
+           brightness * brightness > 1e-6f ||
+           contrast * contrast > 1e-6f || saturation * saturation > 1e-6f;
+  }
 };
 
 // Atajos de teclado del juego (seccion [hotkeys]). Nombres de tecla del SDK: "F8", "Backtick",
@@ -71,11 +109,13 @@ struct HotkeyConfig {
   std::string console = "Backtick";  // consola (SDK)
   std::string achievements = "F7";   // logros (SDK)
   std::string skip_intro = "F";      // saltar los videos del arranque
+  std::string debug_menu = "F6";     // menu debug original Neversoft
 };
 
 struct Config {
   InputConfig input;
   PerfConfig perf;
+  GraphicsConfig graphics;
   HotkeyConfig hotkeys;
   std::vector<ModEntryConfig> mods;  // orden = prioridad (primero gana)
   DevConfig dev;

@@ -10,20 +10,20 @@ import { firstTrack, ownTrack, tracksOf } from '../../timeline/layout.js';
 import { deleteSel, fxOf, snapT } from '../../timeline/edit.js';
 import { seek } from '../playback.js';
 import { Card, edit, Field, Note, Select, Slider } from '../components/fields.jsx';
+import { Icon } from '../react.jsx';
+import { fxIcon } from '../../camera/fx_icons.js';
+import { LOOK_CSS } from '../../viewport/fx.js';
 
-const ICON = { letterbox: '▬', vignette: '◉', flash: '✦', fadein: '◐', fadeout: '◑', bw: '◧', sepia: '☕', saturate: '🌈', blur: '≈',
-  shake: '≋', glow: '✺', contrast: '◪', chroma: '▤', strobe: '⚡', redflash: '❗', dream: '☁', night: '☾', cold: '❄', warm: '🔥', blackout: '■',
-  scanlines: '☰', grain: '░', vhs: '📼', iris: '◯', spotlight: '🔦', heartbeat: '💓', confetti: '🎊', sparks: '✧', snow: '❅',
-  rain: '☂', lightning: 'ϟ', rainbow: '🌈', smoke: '☁', lasers: '⟋', bloom: '☀', motionblur: '⇶', godrays: '☼', tiltshift: '⊟',
-  rackfocus: '◎', sharpen: '◆', emboss: '▩', edges: '▢', comic: '💥', bleach: '◫', teal: '◑', matrix: '⌨', hueshift: '🎨',
-  flicker: '💡', danger: '⚠', fisheye: '◕', wobble: '〰', shockwave: '◌', dutch: '⟀', zoompunch: '⊕', vertigo: '🌀', handheld: '✋',
-  split: '▤', grade: '🎚', focus: '🎯', vaporwave: '🌴', cyberpunk: '🌃', noir: '🕵', sunset: '🌅', lomo: '📷', technicolor: '🎞',
-  infrared: '🔴', pastel: '🍬', film: '🎬', exposure: '☀', tint: '🎨', fadewhite: '○', blockbuster: '🎥', dramatic: '🎭', kodak: '🟨',
-  polaroid: '🖼', retro70: '🕺', miami: '🌴', golden: '🌇', desert: '🏜', ice: '🧊', toxic: '☣', blood: '🩸' };
+// Ficha de un efecto: icono propio o, en los looks de color, una muestra del look sobre un degradado de escenario
+export function FxGlyph({ k, s = 20 }) {
+  const look = LOOK_CSS[k];
+  if (look) return <i className="lookSwatch" style={{ width: s + 6, height: s, filter: look(1) }} />;
+  return <Icon n={fxIcon(k, EFFECTS[k]?.cat)} s={s} />;
+}
 
 const visibleTypes = cur => Object.entries(EFFECTS).filter(([k, v]) => !v.hidden || k === cur);
 const groupedOptions = cur => Object.entries(FX_CATS).flatMap(([c, name]) =>
-  visibleTypes(cur).filter(([, v]) => v.cat === c).map(([k, v]) => [k, `${name} › ${v.label}`]));
+  visibleTypes(cur).filter(([, v]) => v.cat === c).map(([k, v]) => [k, `${name} / ${v.label}`]));
 
 // Un control por ajuste: deslizador, lista o color
 function ParamControl({ k, spec, obj, onSet }) {
@@ -51,7 +51,7 @@ function StripEditor({ e, i, at }) {
     {c.cam === 'own' && <>
       <Field label="Musico"><Select value={c.role} options={ROLES.map(r => [r, ROLE_ES[r]])} onChange={edit(v => { c.role = v; c.p.aim = ROLE_AIM[v]; })} /></Field>
       <Field label="Encuadre"><Select value={c.framing} options={Object.entries(FRAMINGS).map(([k, v]) => [k, v.label])} onChange={edit(setFraming)} /></Field>
-      <Field label="Animacion de entrada"><Select value={c.preset} options={Object.entries(PRESETS).filter(([k]) => k !== 'keys').map(([k, v]) => [k, `${v.icon || ''} ${v.label}`])}
+      <Field label="Animacion de entrada"><Select value={c.preset} options={Object.entries(PRESETS).filter(([k]) => k !== 'keys').map(([k, v]) => [k, v.label])}
         onChange={edit(v => { c.preset = v; })} /></Field>
       <Slider label="Duracion de la animacion" value={c.anim ?? 1.5} min={0.1} max={10} step={0.1} unit=" s" digits={1} onChange={v => { c.anim = v; }}
         hint="Al acabar, la camara se queda quieta en su ultimo encuadre" />
@@ -120,7 +120,7 @@ function addFx(type, combo) {
 function FxEditor({ e }) {
   const tracks = tracksOf('fx'), def = EFFECTS[e.type];
   return <div className="fade">
-    <header className="shotHead" style={{ '--c': '#e66bd1' }}><b className="big">{ICON[e.type]}</b>
+    <header className="shotHead" style={{ '--c': '#b07cc6' }}><b className="big"><FxGlyph k={e.type} s={22} /></b>
       <div><h3>{def?.label}</h3><p className="muted small">{def?.desc || 'Efecto de imagen'}</p></div></header>
     <GroupEditor e={e} />
     <Field label="Efecto"><Select value={e.type} options={groupedOptions(e.type)} onChange={edit(v => { e.type = v; })} /></Field>
@@ -131,7 +131,7 @@ function FxEditor({ e }) {
     <FxParams e={e} />
     <FxParams e={e} common />
     {e.type === 'split' && <SplitEditor e={e} />}
-    <div className="row"><button onClick={() => { seek(e.t); S.playing = true; emit('play'); }}>▶ Ver</button>
+    <div className="row"><button onClick={() => { seek(e.t); S.playing = true; emit('play'); }}><Icon n="play" s={12} /> Ver</button>
       <button onClick={edit(() => { e.params = {}; e.amount = 1; })} title="Vuelve a los valores por defecto">Restablecer</button>
       <button onClick={edit(() => { const id = Math.max(0, ...S.proj.effects.map(x => x.id)) + 1;
         S.proj.effects.push({ ...structuredClone(e), id, t: e.t + e.dur }); S.sel = { type: 'fx', id }; })}>Duplicar despues</button>
@@ -154,9 +154,9 @@ export function FxPanel() {
     <Card title="Presets (efectos ya ajustados que se anaden juntos)">
       <div className="presetGrid">{Object.entries(combos).filter(([, v]) => match({ label: v.label })).map(([k, v]) => (
         <button key={k} className="preset" title={v.fx.map(x => EFFECTS[[].concat(x)[0]]?.label).join(' + ')} onClick={() => addFx([].concat(v.fx[0])[0], v)}>
-          <b>{v.fx.slice(0, 3).map(x => ICON[[].concat(x)[0]]).join('')}</b><span>{v.label}{k.startsWith('u') ? ' ★' : ''}</span></button>))}</div>
+          <b className="stack">{v.fx.slice(0, 3).map((x, i) => <FxGlyph key={i} k={[].concat(x)[0]} s={16} />)}</b><span>{v.label}{k.startsWith('u') && <Icon n="star" s={11} className="own" />}</span></button>))}</div>
       <Note>Un preset se anade como grupo: al seleccionar cualquiera de sus efectos puedes mover, alargar o bajar la intensidad
-        de todo el grupo, o ajustar cada efecto por separado. "Guardar como preset propio" lo deja aqui (marcado con ★).</Note>
+        de todo el grupo, o ajustar cada efecto por separado. "Guardar como preset propio" lo deja aqui, marcado con una estrella.</Note>
     </Card>
     <Card title="Anadir efecto en el cursor">
       <Field label="En la pista"><Select value={S.fxTrack || tracks[0]?.id} options={tracks.map(t => [t.id, t.name])} onChange={v => { S.fxTrack = v; emit('inspector'); }} /></Field>
@@ -165,7 +165,7 @@ export function FxPanel() {
         const items = visibleTypes().filter(([k, v]) => v.cat === c && k !== 'split' && match(v));
         return items.length ? <div key={c}><h4 className="fxCat">{name}</h4>
           <div className="presetGrid">{items.map(([k, v]) => <button key={k} className="preset" title={v.desc} onClick={() => addFx(k)}>
-            <b>{ICON[k]}</b><span>{v.label}</span></button>)}</div></div> : null;
+            <b><FxGlyph k={k} /></b><span>{v.label}</span></button>)}</div></div> : null;
       })}
       <Note>Todo llega al juego por el .edfx: color, luz, enfoque, vineta, franjas y camara los hace el propio motor del juego;
         texturas y particulas se dibujan encima sin tapar el traste ni las notas.</Note>
@@ -173,7 +173,7 @@ export function FxPanel() {
     <Card title={`Efectos (${list.length})`}>
       {list.length ? <ul className="list">{list.map(x => <li key={x.id} className={e?.id === x.id ? 'on' : ''}
         onClick={() => { S.sel = { type: 'fx', id: x.id }; if (S.t < x.t || S.t >= x.t + x.dur) seek(x.t + 1); emit('inspector'); emit('timeline'); }}>
-        <b>{ICON[x.type]}</b><span className="mono">{fmt(x.t).slice(0, -4)}</span><span>{EFFECTS[x.type]?.label}{x.group ? <i className="muted"> · {x.groupLabel}</i> : null}</span>
+        <b><FxGlyph k={x.type} s={16} /></b><span className="mono">{fmt(x.t).slice(0, -4)}</span><span>{EFFECTS[x.type]?.label}{x.group ? <i className="muted"> · {x.groupLabel}</i> : null}</span>
         <span className="muted">{(x.dur / 1000).toFixed(1)} s</span></li>)}</ul>
         : <p className="muted small">Sin efectos. Tambien puedes hacer doble clic en una pista de efectos.</p>}
     </Card>

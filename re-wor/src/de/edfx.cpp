@@ -14,6 +14,8 @@
 //   tri ax ay az bx by bz cx cy cz rrggbbaa     triangulo del objeto anterior (mundo)
 //   text <ms> <duracion ms> x y z alto rrggbbaa <texto...>
 #include "de/edfx.hpp"
+#include "de/cam_watch.hpp"
+#include "de/render_sandbox.hpp"
 
 #include <imgui.h>
 
@@ -453,6 +455,7 @@ void DrawFx2D(Masked* dl, const ImVec4& r, const ActMap& on, float T) {
 }
 
 void DrawFx(ImDrawList* raw, const ImVec4& r, const Song& song, double t) {
+  if (sandbox::DrawsImage()) return;   // los pinta la pasada sandbox en la GPU, debajo de la autopista y el HUD
   ActMap on;
   for (const auto& f : song.fx) {
     if (t < f.t || t >= f.t + f.dur) continue;
@@ -695,11 +698,12 @@ bool CopyCamRaw(const uint8_t* base, uint32_t cam, uint8_t raw[96]) {
 bool ReadCamRaw(const uint8_t* base, uint32_t& cam_out, uint8_t raw[96]) {
   VpCand c[24];
   const int n = ScanViewports(base, c);
+  // Solo el escenario (bg_viewport) o, si no tiene camara, el principal (id 0). El bit 0x10 de vp+104 NO sirve para
+  // saber si esta activo: en la cancion bg_viewport lo alterna frame a frame. Los otros viewports con camara (los 4
+  // primeros planos de la intro de la banda) no son la imagen principal: escribir ahi no se ve.
   int pick = -1;
-  auto active = [&](const VpCand& k) { return k.valid && (k.flags & 0x10) == 0; };
   for (uint32_t want : {0x071F4183u, 0u})
-    for (int i = 0; i < n && pick < 0; ++i) if (c[i].id == want && active(c[i])) pick = i;
-  for (int i = 0; i < n && pick < 0; ++i) if (active(c[i])) pick = i;
+    for (int i = 0; i < n && pick < 0; ++i) if (c[i].id == want && c[i].valid) pick = i;
 
   static uint32_t last_cam = 1; static int dumps = 0;
   const uint32_t now_cam = pick >= 0 ? c[pick].cam : 0;
@@ -730,7 +734,7 @@ void WriteCam(uint8_t* c, const float old_p[3], const float p[3], bool side_righ
       PutF(c + 112 + 4 * j, p[j]);
       PutF(c + 128 + 4 * j, side_right ? R[j] : -R[j]);
       PutF(c + 144 + 4 * j, U[j]);
-      PutF(c + 160 + 4 * j, F[j]);
+      PutF(c + 160 + 4 * j, -F[j]);   // "at" = -hacia donde mira
       if (pos2) PutF(c + 176 + 4 * j, p[j]);
     }
     PutF(c + 192, hfov);
@@ -753,11 +757,22 @@ bool PutRawAt(uint8_t* base, uint32_t cam, const uint8_t raw[96]) {
 }  // namespace
 
 void UpdateGameCamera(uint8_t* base, double ms, const std::string& song) {
+  camwatch::SelfWrite self;
   uint8_t raw[96];
   uint32_t cam = 0;
   GameCam gc;
   bool wrote_now = false;
+  static int s_kept = 0, s_over = 0, s_rep = 0;
+  static Clock::time_point s_rep_at{};
   if (ReadCamRaw(base, cam, raw)) {
+    // diagnostico: lo que escribimos el frame anterior, sigue ahi o el motor lo piso?
+    if (g_memo.wrote && g_memo.addr == cam) (std::memcmp(raw, g_memo.written, 96) == 0 ? s_kept : s_over)++;
+    if (s_kept + s_over >= 120 && s_rep < 12 && Clock::now() - s_rep_at > std::chrono::seconds(4)) {
+      s_rep_at = Clock::now(); ++s_rep;
+      TRACE("[EDFX] camara escrita: el motor la conserva " << s_kept << " frames y la reescribe " << s_over
+            << (s_over > s_kept ? " (el motor recalcula la camara cada frame; la nuestra se reaplica despues)" : ""));
+      s_kept = s_over = 0;
+    }
     if (g_memo.wrote && g_memo.addr == cam)
       for (int c = 0; c < 6; ++c)
         if (std::memcmp(raw + 16 * c, g_memo.written + 16 * c, 16) == 0) std::memcpy(raw + 16 * c, g_memo.base + 16 * c, 16);
@@ -765,7 +780,10 @@ void UpdateGameCamera(uint8_t* base, double ms, const std::string& song) {
     std::memcpy(g_memo.base, raw, 96);
     g_memo.addr = cam;
     auto v3 = [&](int off, float out[3]) { for (int j = 0; j < 3; ++j) out[j] = BeF(raw + off - 112 + 4 * j); };
+    // +160 es "at" (nombre del motor en GetViewportCameraOrient) pero la camara mira en sentido CONTRARIO: la de la
+    // cancion esta en el lado del publico (z=12) y "at" apunta a +z; mirando a -at baja justo al centro del escenario.
     v3(112, gc.p); v3(128, gc.side); v3(144, gc.U); v3(160, gc.F);
+    for (float& v : gc.F) v = -v;
     gc.hfov_raw = BeF(raw + 192 - 112);
     gc.addr = cam;
     const float lf = Len3(gc.F), lu = Len3(gc.U);
@@ -784,7 +802,7 @@ void UpdateGameCamera(uint8_t* base, double ms, const std::string& song) {
     last = Clock::now();
     ++logs;
     TRACE("[EDFX] camara del juego @" << std::hex << gc.addr << std::dec << " pos=(" << gc.p[0] << "," << gc.p[1] << ","
-          << gc.p[2] << ") at=(" << gc.F[0] << "," << gc.F[1] << "," << gc.F[2] << ") up=(" << gc.U[0] << ","
+          << gc.p[2] << ") mira=(" << gc.F[0] << "," << gc.F[1] << "," << gc.F[2] << ") up=(" << gc.U[0] << ","
           << gc.U[1] << "," << gc.U[2] << ") hfov=" << gc.hfov_raw << (gc.side_is_right ? " lado=derecha" : " lado=izquierda"));
   }
 
@@ -807,6 +825,7 @@ void UpdateGameCamera(uint8_t* base, double ms, const std::string& song) {
     }
     WriteCam(base + gc.addr, gc.p, k.p, gc.side_is_right, R, U, F, gc.rad ? k.hfov / 57.2957795f : k.hfov);
     wrote_now = true;
+    camwatch::ArmOnce(base, gc.addr);
     std::memcpy(gc.p, k.p, sizeof(gc.p));
     std::memcpy(gc.U, U, sizeof(gc.U));
     std::memcpy(gc.F, F, sizeof(gc.F));
@@ -818,7 +837,9 @@ void UpdateGameCamera(uint8_t* base, double ms, const std::string& song) {
   if (gc.ok && ms > 0) {
     float shake = 0, dutch = 0, punch = 0, vert = 0, hand = 0, el = 0, el_p = 0, left_v = 0, el_v = 0;
     float dutch_deg = 15, punch_zoom = 0.3f, punch_len = 0.6f, vert_amt = 0.45f, shake_spd = 1, hand_spd = 1;
+    const bool image2d = sandbox::DrawsImage();   // holandes/zoom/vertigo/mano: transformacion 2D como el editor
     for (const auto& f : ActiveFxNow()) {
+      if (image2d && f.type != "shake") continue;
       if (f.type == "shake") { shake = std::max(shake, f.k); shake_spd = f.P("speed", 1); }
       else if (f.type == "dutch") { dutch = std::max(dutch, f.k * std::min({1.f, f.el / 0.5f, f.left / 0.5f})); dutch_deg = f.P("angle", 15); }
       else if (f.type == "zoompunch") { punch = std::max(punch, f.k); el_p = f.el; punch_zoom = f.P("zoom", 0.3f); punch_len = f.P("len", 0.6f); }
@@ -949,7 +970,7 @@ bool StripCamera(int i, float p[3], float side[3], float U[3], float F[3], float
     if (s.keys.empty() || !CameraAt(s, t - s.t, k)) return false;
     float R[3];
     BasisFromKey(k, R, U, F);
-    for (int j = 0; j < 3; ++j) { p[j] = k.p[j]; side[j] = gc.side_is_right ? R[j] : -R[j]; }
+    for (int j = 0; j < 3; ++j) { p[j] = k.p[j]; side[j] = gc.side_is_right ? R[j] : -R[j]; F[j] = -F[j]; }   // F sale como fila "at"
     hfov_raw = gc.rad ? k.hfov / 57.2957795f : k.hfov;
     return true;
   }
@@ -991,6 +1012,62 @@ void SetNativeLetterbox(bool on) { g_native_letterbox = on; }
 double SongMsNow() {
   std::lock_guard<std::mutex> lk(g_clock_mutex);
   return g_game_ms;
+}
+
+bool SongPlaying() {
+  std::lock_guard<std::mutex> lk(g_clock_mutex);
+  const double still = std::chrono::duration<double, std::milli>(Clock::now() - g_game_moved_at).count();
+  return g_game_ms > 0 && still <= kStillMs && !g_loaded_song.empty();
+}
+
+namespace {
+uint32_t StageCam(const uint8_t* base) {   // camara actual del viewport del escenario (o del principal)
+  VpCand c[24];
+  const int n = ScanViewports(base, c);
+  for (uint32_t want : {0x071F4183u, 0u})
+    for (int i = 0; i < n; ++i) if (c[i].id == want && c[i].valid) return c[i].cam;
+  return 0;
+}
+struct ReapplyStats { int kept = 0, over = 0, moved = 0; };
+ReapplyStats g_rs[4];
+Clock::time_point g_rs_at{};
+int g_rs_logs = 0;
+}  // namespace
+
+int g_wr[16] = {};
+void OnEngineCamWrite(uint8_t* base, uint32_t obj, int fn) {
+  if (!g_memo.wrote || obj != g_memo.addr || fn < 0 || fn > 15) return;
+  camwatch::SelfWrite self;
+  ++g_wr[fn];
+  PutRawAt(base, obj, g_memo.written);
+}
+
+void ReapplyCamera(uint8_t* base, int point) {
+  if (!g_memo.wrote || point < 0 || point > 3) return;
+  camwatch::SelfWrite self;
+  const uint32_t cam = StageCam(base);
+  if (!cam) return;
+  uint8_t now[96];
+  if (cam != g_memo.addr) ++g_rs[point].moved;   // el motor cambio de camara (corte) a mitad de frame
+  else if (RawAt(base, cam, now)) (std::memcmp(now, g_memo.written, 96) == 0 ? g_rs[point].kept : g_rs[point].over)++;
+  PutRawAt(base, cam, g_memo.written);
+  if (g_rs_logs < 15 && Clock::now() - g_rs_at > std::chrono::seconds(5)) {
+    int tot = 0;
+    for (const auto& r : g_rs) tot += r.kept + r.over + r.moved;
+    if (tot < 200) return;
+    g_rs_at = Clock::now();
+    ++g_rs_logs;
+    static const char* names[4] = {"tras la logica (823F2710)", "antes del cierre (82434D40)", "antes de la espera (8242AD60)", "?"};
+    std::ostringstream o;
+    o << "[EDFX] camara reaplicada:";
+    for (int i = 0; i < 3; ++i)
+      o << " [" << names[i] << ": intacta " << g_rs[i].kept << ", pisada " << g_rs[i].over << ", otra camara " << g_rs[i].moved << "]";
+    o << " | escritores del motor corregidos:";
+    for (int i = 0; i < 16; ++i) if (g_wr[i]) o << " #" << i << "=" << g_wr[i];
+    for (int& w : g_wr) w = 0;
+    TRACE(o.str());
+    for (auto& r : g_rs) r = {};
+  }
 }
 
 EdfxOverlay::EdfxOverlay(rex::ui::ImGuiDrawer* drawer) : ImGuiDialog(drawer) {}

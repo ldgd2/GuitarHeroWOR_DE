@@ -24,7 +24,7 @@ function gemIndex(t) {
 const wpos = (bone, out) => bone.getWorldPosition(out);
 
 // cierra un dedo (cadena de 3 huesos) hacia el punto 'center': cada falange gira 'ang' radianes hacia el
-function curl(c, chain, center, angs) {
+export function curl(c, chain, center, angs) {
   for (let j = 0; j < chain.length - 1; j++) {
     const B = c.bones[chain[j]], C = c.bones[chain[j + 1]]; if (!B || !C) return;
     wpos(B, a); wpos(C, b); d.subVectors(b, a);

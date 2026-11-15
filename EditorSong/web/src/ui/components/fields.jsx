@@ -2,7 +2,7 @@
 // deshacer por cambio, no por tecla).
 import { changed, pushUndo, S } from '../../core/state.js';
 import { hx, keyOf } from '../../core/qb.js';
-import { useEffect, useState  } from '../react.jsx';
+import { Icon, useEffect, useState } from '../react.jsx';
 
 // aplica una edicion del proyecto con su paso de deshacer
 export const edit = fn => (...a) => { pushUndo(); fn(...a); changed(); };
@@ -30,8 +30,8 @@ export const Select = ({ value, options, onChange }) => (<select value={value} o
 export const Check = ({ checked, onChange, children }) => (<label className="check">
   <input type="checkbox" checked={!!checked} onChange={e => onChange(e.target.checked)} /><span className="box"></span>{children}</label>);
 
-export const Card = ({ title, color, actions, children }) => (<section className="card">
-  {title && (<header><b style={{ color }}>{title}</b><span className="sep"></span>{actions}</header>)}{children}</section>);
+export const Card = ({ title, icon, color, actions, children }) => (<section className="card">
+  {title && (<header>{icon && <Icon n={icon} s={15} />}<b style={{ color }}>{title}</b><span className="sep"></span>{actions}</header>)}{children}</section>);
 
 export const Note = ({ kind, children }) => (<p className={'note ' + (kind || '')}>{children}</p>);
 

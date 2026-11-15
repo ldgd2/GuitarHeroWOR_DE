@@ -33,18 +33,21 @@ const Btn = ({ icon, label, onClick, disabled, cls = '', title }) => (<button cl
 export function TopBar() {
   useBus('song', 'changed', 'songs');
   const P = S.proj;
-  return (<><strong className="brand">EditorSong</strong>
+  return (<><strong className="brand"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" aria-hidden="true"><path d="M3.5 21 9.5 3M20.5 21 14.5 3M6.2 13h11.6M8 7.5h8" /></svg>EditorSong</strong>
     <SongPicker />
-    <div className="songname">{P ? (<><b>{P.song.name}</b>{S.dirty && (<i className="dot" title="Cambios sin guardar"></i>)}
-      <small className="muted">{P.song.editable ? P.song.mod || 'mod' : 'solo referencia'}</small></>) : (<span className="muted">{S.loadingSong ? 'abriendo...' : 'sin cancion'}</span>)}</div>
-    <label className="venue">Escenario <select value={S.venueName || ''} onChange={e => setVenue(e.target.value)}>
+    <div className="songname">{P ? (<><b>{P.song.name}{S.dirty && (<i className="dot" title="Cambios sin guardar"></i>)}</b>
+      <small className="muted">{P.song.editable ? P.song.mod || 'mod' : 'solo referencia'}</small></>) : (<span className="muted">{S.loadingSong ? 'Abriendo...' : 'Ninguna cancion abierta'}</span>)}</div>
+    <i className="tbDiv" /><label className="venue">Escenario <select value={S.venueName || ''} onChange={e => setVenue(e.target.value)}>
       {S.venues.map(v => (<option key={v} value={v}>{v.replace(/^Z_/, '')}</option>))}</select></label>
     <span className="sep"></span>
     <Btn icon="undo" label="Deshacer" title="Deshacer (Ctrl+Z)" onClick={undo} disabled={!S.undo.length} cls="ghost" />
     <Btn icon="redo" label="Rehacer" title="Rehacer (Ctrl+Y)" onClick={redo} disabled={!S.redo.length} cls="ghost" />
+    <i className="tbDiv" />
     <Btn icon="save" label="Guardar" title="Guarda el proyecto en EditorSong/projects (no toca el juego) - Ctrl+S" onClick={save} disabled={!P} />
     <Btn icon="reload" label="Releer" title="Descarta el proyecto guardado y vuelve a leer la cancion del juego" onClick={reload} disabled={!P} cls="ghost" />
-    <Btn icon="history" label="Copias" onClick={backups} disabled={!P} cls="ghost" />
+    <Btn icon="history" label="Copias" title="Copias de seguridad de la cancion" onClick={backups} disabled={!P} cls="ghost" />
+    <i className="tbDiv" />
     <Btn icon="build" label="Compilar al juego" title="Escribe la cancion en el mod (con copia de seguridad) y la valida" onClick={build}
       disabled={!P?.song.editable} cls="primary" /></>);
 }

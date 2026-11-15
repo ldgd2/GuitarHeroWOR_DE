@@ -46,3 +46,10 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# modelos de MediaPipe: se descargan al compilar (android/app/build.gradle.kts)
+android/app/src/main/assets/*.task
+
+# vista previa 3D: el personaje sale de tu copia del juego y el paquete JS se compila (python -m editor.band.phone_model)
+assets/preview/character.glb
+assets/preview/preview.js

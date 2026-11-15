@@ -11,6 +11,7 @@ import { api, changed, emit, pushUndo, S } from '../core/state.js';
 import { newShot, worldPose } from '../camera/shots.js';
 import { keepRendering, mon, onAfterMonitor, onFrame, progCam } from '../viewport/scene.js';
 import { seek, setPlaying } from '../ui/playback.js';
+import { CAP, onCapMsg } from '../capture/capture.js';
 
 // Enganches para que otro modulo (el editor de keyframes) reciba la grabacion en su copia de la toma
 // en vez de en el proyecto: target() -> objeto con forma de toma, before() antes de grabar, after() al acabar.
@@ -41,7 +42,12 @@ export async function vcamConnect() {
 }
 
 function onMsg(m) {
-  if (m.type === 'link') { VCAM.phone = !!m.phone; if (!m.phone) { if (VCAM.rec) stopRec(); VCAM.live = false; } ui(); }
+  if (typeof m.type === 'string' && m.type.startsWith('cap')) { onCapMsg(m); return; }
+  if (m.type === 'link') {
+    VCAM.phone = !!m.phone;
+    if (!m.phone) { if (VCAM.rec) stopRec(); VCAM.live = false; onCapMsg({ type: 'capmode', mode: null }); }
+    ui();
+  }
   else if (m.type === 'pose') VCAM.pose = { q: m.q || [0, 0, 0, 1], p: m.p || [0, 0, 0], zoom: m.zoom || 1 };
   else if (m.type === 'rec') { if (m.on) startRec(); else stopRec(); }
   else if (m.type === 'live') { VCAM.live = !!m.on; VCAM.base = null; ui(); }
@@ -143,10 +149,11 @@ onAfterMonitor(() => {
 
 function sendState() {
   const s = VCAM.shot || S.proj?.shots?.find(x => x.id === VCAM.target);
-  send({ type: 'state', rec: VCAM.rec, live: VCAM.live, playing: !!S.playing, t: Math.round(S.t), hidden: document.hidden,
+  send({ type: 'state', rec: VCAM.rec, live: VCAM.live, playing: !!S.playing, t: Math.round(S.t), hidden: document.hidden, capRec: !!CAP.rec,
     shot: s ? { id: s.id, t: s.t, dur: VCAM.growing && VCAM.rec ? 0 : s.dur } : null, keys: VCAM.shot?.keys.length || 0 });
 }
 setInterval(() => { if (VCAM.phone) sendState(); }, 250);
+CAP.notify = sendState;
 // el editor sigue dibujando (y mandando imagen) aunque su ventana quede tapada o minimizada mientras usas el telefono
 keepRendering(() => VCAM.phone);
 setTimeout(vcamConnect, 500);

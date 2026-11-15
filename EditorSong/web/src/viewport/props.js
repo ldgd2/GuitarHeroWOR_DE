@@ -161,6 +161,7 @@ let down = null;
 view.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
 view.addEventListener('pointerup', e => {
   if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || e.button !== 0 || gizmo.dragging) return;
+  if (document.body.classList.contains('kfMode')) return;   // el editor de animacion usa los clics de la vista
   const r = view.getBoundingClientRect();
   ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), editCam);
   const hit = ray.intersectObjects(group.children, true)[0];

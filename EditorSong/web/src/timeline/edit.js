@@ -1,5 +1,8 @@
 // Operaciones de edicion sobre el proyecto: mover, redimensionar, anadir y borrar elementos.
-import { $, changed, dropUndo, pushUndo, S } from '../core/state.js';
+import { changed, dropUndo, pushUndo, S } from '../core/state.js';
+import { same, selList, setSelection } from '../core/selection.js';
+import { layerOf, newLayer, poseLayers } from '../rig/poseLayer.js';
+import { trackById } from './layout.js';
 import { evParams, evScr, evTime, hx, K, mkStruct, setVal, val } from '../core/qb.js';
 import { ROLE_ES, roleOfKey } from '../core/roles.js';
 import { clipChars, clipSpan } from '../song/clips.js';
@@ -10,6 +13,24 @@ import { addProp } from '../viewport/props.js';
 export const shotOf = sel => S.proj.shots?.find(s => s.id === sel.id);
 export const fxOf = sel => S.proj.effects?.find(e => e.id === sel.id);
 export const propOf = sel => S.proj.props?.find(e => e.id === sel.id);
+const objOf = sel => (sel.type === 'shot' ? shotOf(sel) : sel.type === 'fx' ? fxOf(sel) : sel.type === 'prop' ? propOf(sel) : sel.type === 'pose' ? layerOf(sel) : null);
+
+// tiempo y duracion de cualquier elemento (para mover varios a la vez)
+export function getT(sel) {
+  const P = S.proj, o = objOf(sel);
+  if (o) return o.t ?? 0;
+  if (sel.type === 'cam') return P.cameras[sel.track][sel.i]?.[0] ?? 0;
+  if (sel.type === 'note') return P.notes[sel.track][sel.i]?.[0] ?? 0;
+  if (sel.type === 'event') return val(P.events[sel.i], 'time', 0);
+  return 0;
+}
+export function getLen(sel) {
+  const P = S.proj, o = objOf(sel);
+  if (o) return o.dur ?? 0;
+  if (sel.type === 'cam') return P.cameras[sel.track][sel.i]?.[1] ?? 0;
+  if (sel.type === 'note') return P.notes[sel.track][sel.i]?.[2] ?? 0;
+  return 0;
+}
 
 export function snapT(t, free) {
   if (free || !S.snap || !S.proj.fretbars.length) return Math.max(0, Math.round(t));
@@ -25,6 +46,7 @@ export function setT(sel, t) {
   if (sel.type === 'shot') { const s = shotOf(sel); if (s) s.t = t; }
   else if (sel.type === 'fx') { const e = fxOf(sel); if (e) e.t = t; }
   else if (sel.type === 'prop') { const e = propOf(sel); if (e) e.t = t; }
+  else if (sel.type === 'pose') { const e = layerOf(sel); if (e) e.t = t; }
   else if (sel.type === 'cam') P.cameras[sel.track][sel.i][0] = t;
   else if (sel.type === 'note') P.notes[sel.track][sel.i][0] = t;
   else if (sel.type === 'event') setVal(P.events[sel.i], 'time', 'int', t);
@@ -35,6 +57,7 @@ export function setLen(sel, len) {
   if (sel.type === 'shot') { const s = shotOf(sel); if (s) s.dur = Math.min(len, 65000); }
   else if (sel.type === 'fx') { const e = fxOf(sel); if (e) e.dur = len; }
   else if (sel.type === 'prop') { const e = propOf(sel); if (e) e.dur = len; }
+  else if (sel.type === 'pose') { const e = layerOf(sel); if (e) { e.dur = len; for (const k of e.keys || []) k.t = Math.min(k.t, len); } }
   else if (sel.type === 'cam') P.cameras[sel.track][sel.i][1] = Math.min(len, 65535);
   else if (sel.type === 'note') P.notes[sel.track][sel.i][2] = Math.min(len, 65535);
   else if (sel.type === 'event' && evScr(P.events[sel.i]) === K.Band_PlayClip) {
@@ -60,6 +83,9 @@ export function addAt(lane, t) {
   } else if (kind === 'props') {
     dropUndo(); const p = addProp(S.propKind || 'box', { t, dur: 8000, track: lane.id }); if (p) S.sel = { type: 'prop', id: p.id };
     return;
+  } else if (kind === 'pose') {
+    const L = newLayer(lane.role, t); L.track = lane.id; poseLayers().push(L);
+    S.sel = { type: 'pose', id: L.id }; S.tab = 'insp';
   } else if (kind === 'auto' || kind === 'moment') {
     P.cameras[kind].push([t, 3000, kind === 'auto' ? 8 : 33]);
     S.sel = { type: 'cam', track: kind, i: P.cameras[kind].length - 1 };
@@ -96,8 +122,10 @@ export function addAt(lane, t) {
 
 export function deleteSel() {
   const s = S.sel, P = S.proj; if (!s || !P) return;
+  if (selList().length > 1) { deleteSelection(); return; }
   pushUndo();
   if (s.type === 'shot') P.shots = P.shots.filter(x => x.id !== s.id);
+  else if (s.type === 'pose') P.poseLayers = poseLayers().filter(x => x.id !== s.id);
   else if (s.type === 'fx') P.effects = P.effects.filter(x => x.id !== s.id);
   else if (s.type === 'prop') P.props = P.props.filter(x => x.id !== s.id);
   else if (s.type === 'cam') P.cameras[s.track].splice(s.i, 1);
@@ -119,3 +147,78 @@ export function newChar(role) {
   if (role !== 'drummer') m.push(['qbkey', 'strum', K.true], ['qbkey', 'fret', K.true], ['qbkey', 'chord', K.true]);
   return mkStruct(m);
 }
+
+// ---------- varios elementos a la vez ----------
+// los que estan en pistas bloqueadas no se mueven ni se borran
+const lockedOf = sel => {
+  const o = objOf(sel); if (o?.track && trackById(o.track)?.lock) return true;
+  if (sel.type === 'cam') return !!trackById(sel.track)?.lock;
+  return false;
+};
+export const movable = () => selList().filter(x => !lockedOf(x));
+
+// borra todos los elegidos (los de indice, de mayor a menor para no desplazar los demas)
+export function deleteSelection() {
+  const P = S.proj, list = movable(); if (!P || !list.length) return;
+  pushUndo();
+  const ids = type => new Set(list.filter(x => x.type === type).map(x => x.id));
+  const sh = ids('shot'), fx = ids('fx'), pr = ids('prop'), po = ids('pose');
+  if (sh.size) P.shots = P.shots.filter(x => !sh.has(x.id));
+  if (fx.size) P.effects = P.effects.filter(x => !fx.has(x.id));
+  if (pr.size) P.props = P.props.filter(x => !pr.has(x.id));
+  if (po.size) P.poseLayers = poseLayers().filter(x => !po.has(x.id));
+  const byIdx = list.filter(x => ['cam', 'note', 'event'].includes(x.type)).sort((a, b) => b.i - a.i);
+  for (const x of byIdx) {
+    if (x.type === 'cam') P.cameras[x.track].splice(x.i, 1);
+    else if (x.type === 'note') P.notes[x.track].splice(x.i, 1);
+    else P.events.splice(x.i, 1);
+  }
+  S.sel = null; S.multi = null; changed();
+}
+
+// portapapeles: copias de los elementos con su tiempo relativo al primero
+let CLIP = null;
+export function copySelection() {
+  const P = S.proj, list = selList(); if (!P || !list.length) return 0;
+  const t0 = Math.min(...list.map(getT));
+  CLIP = list.map(x => {
+    const dt = getT(x) - t0, o = objOf(x);
+    if (o) return { type: x.type, dt, data: JSON.parse(JSON.stringify(o)) };
+    if (x.type === 'cam') return { type: 'cam', track: x.track, dt, data: [...P.cameras[x.track][x.i]] };
+    if (x.type === 'note') return { type: 'note', track: x.track, dt, data: [...P.notes[x.track][x.i]] };
+    if (x.type === 'event') return { type: 'event', dt, data: JSON.parse(JSON.stringify(P.events[x.i])) };
+    return null;
+  }).filter(Boolean);
+  return CLIP.length;
+}
+export const hasClipboard = () => !!CLIP?.length;
+export function pasteAt(t) {
+  const P = S.proj; if (!P || !CLIP?.length) return;
+  pushUndo();
+  const out = [], nid = list => Math.max(0, ...(list || []).map(x => x.id)) + 1;
+  for (const c of CLIP) {
+    const at = Math.max(0, Math.round(t + c.dt)), d = JSON.parse(JSON.stringify(c.data));
+    if (c.type === 'shot') { d.id = nid(P.shots); d.t = at; (P.shots ||= []).push(d); out.push({ type: 'shot', id: d.id }); }
+    else if (c.type === 'fx') { d.id = nid(P.effects); d.t = at; (P.effects ||= []).push(d); out.push({ type: 'fx', id: d.id }); }
+    else if (c.type === 'prop') { d.id = nid(P.props); d.t = at; (P.props ||= []).push(d); out.push({ type: 'prop', id: d.id }); }
+    else if (c.type === 'pose') { d.id = nid(P.poseLayers); d.t = at; poseLayers().push(d); out.push({ type: 'pose', id: d.id }); }
+    else if (c.type === 'cam') { d[0] = at; P.cameras[c.track].push(d); out.push({ type: 'cam', track: c.track, i: P.cameras[c.track].length - 1 }); }
+    else if (c.type === 'note') { d[0] = at; P.notes[c.track].push(d); out.push({ type: 'note', track: c.track, i: P.notes[c.track].length - 1 }); }
+    else if (c.type === 'event') { setVal(d, 'time', 'int', at); P.events.push(d); out.push({ type: 'event', i: P.events.length - 1 }); }
+  }
+  changed();
+  setSelection(out);
+}
+export function duplicateSelection() {
+  const list = selList(); if (!list.length) return;
+  const t1 = Math.max(...list.map(x => getT(x) + (getLen(x) || 0)));
+  if (copySelection()) pasteAt(t1);
+}
+// mueve todos los elegidos dt ms (con su paso de deshacer)
+export function nudgeSelection(dt) {
+  const list = movable(); if (!list.length) return;
+  pushUndo();
+  for (const x of list) setT(x, Math.max(0, Math.round(getT(x) + dt)));
+  changed();
+}
+export { same };
