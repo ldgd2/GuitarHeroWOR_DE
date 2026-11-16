@@ -48,7 +48,33 @@ REXCVAR_DEFINE_BOOL(d3d12_submit_on_primary_buffer_end, true, "GPU/D3D12",
                     "Submit command list when PM4 primary buffer ends")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
+REXCVAR_DECLARE(std::string, swap_post_effect);   // re-wor: FXAA al momento (graphics_system.cpp)
+
 namespace rex::graphics {
+namespace {
+// re-wor: contadores de la ventana en curso (hilo de GPU); se publican en GetDrawHooks().stats
+struct PerfWindow {
+  LARGE_INTEGER start{}, last_swap{};
+  uint32_t frames = 0, draws = 0, resolves = 0, stalls = 0;
+  double stall_ms = 0, worst_stall_ms = 0, worst_frame_ms = 0, last_frame_ms = 0;
+} g_perf;
+double PerfMs(const LARGE_INTEGER& a, const LARGE_INTEGER& b) {
+  static LARGE_INTEGER f = [] { LARGE_INTEGER x; QueryPerformanceFrequency(&x); return x; }();
+  return double(b.QuadPart - a.QuadPart) * 1000.0 / double(f.QuadPart);
+}
+// espera a la GPU medida (el hilo de comandos se queda parado)
+void PerfWait(HANDLE event) {
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  WaitForSingleObject(event, INFINITE);
+  QueryPerformanceCounter(&t1);
+  const double ms = PerfMs(t0, t1);
+  ++g_perf.stalls;
+  g_perf.stall_ms += ms;
+  if (ms > g_perf.worst_stall_ms) g_perf.worst_stall_ms = ms;
+}
+}  // namespace
+
 DrawHooks& GetDrawHooks() {
   static DrawHooks hooks;
   return hooks;
@@ -1906,6 +1932,42 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbu
   vertex_buffers_in_sync_[1] = 0;
 
   RunSandboxPassIfPending();
+  {   // re-wor: FXAA de la salida cambiable sin reiniciar
+    static std::string s_fx = "";
+    const std::string& fx = REXCVAR_GET(swap_post_effect);
+    if (fx != s_fx) {
+      s_fx = fx;
+      SetDesiredSwapPostEffect(fx == "fxaa"           ? SwapPostEffect::kFxaa
+                               : fx == "fxaa_extreme" ? SwapPostEffect::kFxaaExtreme
+                                                      : SwapPostEffect::kNone);
+    }
+  }
+  {   // re-wor: medidas de frame
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    if (!g_perf.start.QuadPart) g_perf.start = g_perf.last_swap = now;
+    const double fms = PerfMs(g_perf.last_swap, now);
+    g_perf.last_swap = now;
+    g_perf.last_frame_ms = fms;
+    if (fms > g_perf.worst_frame_ms) g_perf.worst_frame_ms = fms;
+    ++g_perf.frames;
+    const double wms = PerfMs(g_perf.start, now);
+    if (wms >= 1000.0) {
+      GpuStats& st = GetDrawHooks().stats;
+      st.frames = g_perf.frames;
+      st.draws = g_perf.draws;
+      st.resolves = g_perf.resolves;
+      st.stalls = g_perf.stalls;
+      st.window_ms = float(wms);
+      st.stall_ms = float(g_perf.stall_ms);
+      st.worst_stall_ms = float(g_perf.worst_stall_ms);
+      st.worst_frame_ms = float(g_perf.worst_frame_ms);
+      st.last_frame_ms = float(fms);
+      ++st.seq;
+      g_perf = PerfWindow{};
+      g_perf.start = g_perf.last_swap = now;
+    }
+  }
   if (auto hook = GetDrawHooks().swap) hook();
   if (!graphics_system_)
     return;
@@ -2422,6 +2484,7 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
 
   // re-wor: aviso al juego (sandbox de render) con el draw ya preparado
   ++sandbox_draws_since_resolve_;
+  ++g_perf.draws;
   if (auto hook = GetDrawHooks().draw) {
     DrawHookInfo hi;
     hi.vs_hash = vertex_shader->ucode_data_hash();
@@ -2904,6 +2967,7 @@ void D3D12CommandProcessor::RunSandboxPassIfPending() {
 }
 
 bool D3D12CommandProcessor::IssueCopy() {
+  ++g_perf.resolves;   // re-wor
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
@@ -3171,7 +3235,7 @@ void D3D12CommandProcessor::CheckSubmissionFence(uint64_t await_submission) {
                     SUCCEEDED(queue_operations_since_submission_fence_->SetEventOnCompletion(
                         fence_value, fence_completion_event_)))) {
         PROFILE_CMD_BUFFER_STALL();
-        WaitForSingleObject(fence_completion_event_, INFINITE);
+        PerfWait(fence_completion_event_);
         queue_operations_done_since_submission_signal_ = false;
       } else {
         REXGPU_ERROR(
@@ -3190,7 +3254,7 @@ void D3D12CommandProcessor::CheckSubmissionFence(uint64_t await_submission) {
     if (SUCCEEDED(
             submission_fence_->SetEventOnCompletion(await_submission, fence_completion_event_))) {
       PROFILE_CMD_BUFFER_STALL();
-      WaitForSingleObject(fence_completion_event_, INFINITE);
+      PerfWait(fence_completion_event_);
       submission_completed_ = submission_fence_->GetCompletedValue();
     }
   }

@@ -30,6 +30,8 @@
 #include "core/crash_handler.hpp"
 #include "core/path_resolver.hpp"
 #include "de/de_hooks.hpp"
+#include "de/frame_pacing.hpp"
+#include "de/de_hooks.hpp"
 #include "de/edfx.hpp"
 #include "generated/re_wor_pch.h"
 
@@ -613,6 +615,31 @@ bool Dispatch(PPCContext& ctx, uint8_t* base, const std::string& line, std::stri
     if (a.empty() || b.empty()) { reply = "uso: rename <simbolo> <nombre nuevo>"; return false; }
     return RenameSymbol(base, a, b, reply);
   }
+  if (cmd == "peek" || cmd == "poke") {   // memoria del juego: peek <addr hex>, poke <addr hex> <valor>
+    std::string tail, a = first(tail);
+    rest = tail;
+    std::string tail2, v = first(tail2);
+    const uint32_t addr = static_cast<uint32_t>(std::strtoul(a.c_str(), nullptr, 16));
+    uint32_t cur = 0;
+    if (!addr || !SafeRead32(base, addr, &cur)) { reply = "direccion no legible"; return false; }
+    if (cmd == "poke") {
+      if (v.empty()) { reply = "uso: poke <direccion hex> <valor>"; return false; }
+      REX_STORE_U32(addr, static_cast<uint32_t>(std::strtol(v.c_str(), nullptr, 0)));
+    }
+    char b[64];
+    std::snprintf(b, sizeof(b), "%08x = %u (antes %u)", addr, REX_LOAD_U32(addr), cur);
+    reply = b;
+    return true;
+  }
+  if (cmd == "fps") {
+    char b[160];
+    const auto st = re_wor::de::frame_pacing::Get();
+    std::snprintf(b, sizeof(b), "motor %.1f fps, logica %.1f fps, objetivo %d%s, velocidad del motor %.2fx, cancion %.2fx",
+                  re_wor::de::GameFps(), re_wor::de::LogicFps(), st.target_hz,
+                  st.fallback ? " (protegido: 60)" : st.unlocked ? " sin candados" : "", st.engine_speed, st.song_speed);
+    reply = b;
+    return true;
+  }
   if (cmd == "count") {
     reply = std::to_string(GetLoadedScriptCount(base)) + " simbolos en la tabla global";
     return true;
@@ -769,6 +796,7 @@ void OnLogicFrame(PPCContext& ctx, uint8_t* base) {
   if (!g_scripts_loaded.load(std::memory_order_relaxed) && BootDone()) {
     g_scripts_loaded = true;
     LoadScriptFolder(ctx, base);
+    ApplyEngineLimitsPatches(base);
   }
   std::vector<Order> todo;
   {
@@ -836,6 +864,44 @@ bool WriteIntGlobal(const std::string& name, uint8_t* base, int value) {
   if (!e || !SafeRead8(base, e + 2, &type) || type != kInt) return false;
   REX_STORE_U32(e + 12, static_cast<uint32_t>(value));
   return true;
+}
+
+bool WriteFloatGlobal(const std::string& name, uint8_t* base, float value) {
+  const uint32_t e = FindSymbol(base, CalculateQbKey(name));
+  uint8_t type = 0;
+  if (!e || !SafeRead8(base, e + 2, &type) || type != kFloat) return false;
+  uint32_t raw = 0;
+  std::memcpy(&raw, &value, sizeof(float));
+  REX_STORE_U32(e + 12, raw);
+  return true;
+}
+
+void ApplyEngineLimitsPatches(uint8_t* base) {
+  if (!base) return;
+  int count = 0;
+  count += WriteIntGlobal("default_far_plane_distance", base, 1500) ? 1 : 0;
+  count += WriteIntGlobal("cull_max_instances", base, 1500) ? 1 : 0;
+  count += WriteIntGlobal("cull_max_geom", base, 3500) ? 1 : 0;
+  count += WriteIntGlobal("cull_max_occluder", base, 512) ? 1 : 0;
+  count += WriteFloatGlobal("cull_smallobj", base, 0.000001f) ? 1 : 0;
+  count += WriteIntGlobal("max_streams", base, 32) ? 1 : 0;
+  count += WriteIntGlobal("max_sound_entries", base, 3072) ? 1 : 0;
+  count += WriteIntGlobal("num_sound_instances", base, 128) ? 1 : 0;
+  count += WriteIntGlobal("pool_text_instances", base, 2048) ? 1 : 0;
+  count += WriteIntGlobal("fmod_memory_size", base, 25165824) ? 1 : 0;
+  count += WriteIntGlobal("cpu_skinning_buffer_size", base, 40000) ? 1 : 0;
+  count += WriteIntGlobal("cpu_skin_wrap_buffer_size", base, 15000) ? 1 : 0;
+  count += WriteIntGlobal("node_instances_buff", base, 600) ? 1 : 0;
+  count += WriteIntGlobal("node_statics_buff", base, 500) ? 1 : 0;
+  count += WriteIntGlobal("node_sort_buff", base, 512) ? 1 : 0;
+  count += WriteIntGlobal("node_misc_buff", base, 4000) ? 1 : 0;
+  count += WriteIntGlobal("node_2d_buff", base, 600) ? 1 : 0;
+  count += WriteIntGlobal("node_particle_buff", base, 2500) ? 1 : 0;
+  count += WriteIntGlobal("node_particle_node", base, 512) ? 1 : 0;
+  count += WriteIntGlobal("node_light_buff", base, 300) ? 1 : 0;
+  count += WriteIntGlobal("target_ntsc_framerate", base, 240) ? 1 : 0;
+  count += WriteIntGlobal("gpu_vsync_time_interval", base, 0) ? 1 : 0;
+  TRACE("[QBBridge] Parche en memoria de limites Xbox 360 aplicado a tabla QB: " << count << " simbolos actualizados");
 }
 
 std::vector<LogEntry> GetRecentLogs() {

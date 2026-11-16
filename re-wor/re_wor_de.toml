@@ -11,27 +11,36 @@ debug_build = false
 log_file_opens = true
 show_fps = false
 target_refresh_rate = 144
-uncapped_fps = true
+uncapped_fps = false
+
+[game]
+language = 'en'
 
 [graphics]
+aniso = 0
 async_pipeline_compile = true
-backend = 'd3d12'
-bloom = 0.60000002384185791
-blur = 0.20000000298023224
-brightness = 0.20000000298023224
+backend = 'vulkan'
+bloom = 0.0
+blur = 0.0
+brightness = 0.0
 contrast = 0.0
-glow = 0.20000000298023224
+crowd = 0
+fxaa = false
+glow = 0.0
 grain = 0.0
 letterbox = true
-msaa2x = true
-refresh_hz = 120
+msaa2x = false
+perf_detail = false
+post_fx = false
+preset = 0
+refresh_hz = 240
 render_target_path = 'rtv'
 resolution = '1080p'
-resolution_scale = 2
+resolution_scale = 1
 saturation = 0.0
-sharpness = 0.0
+sharpness = 0.69999998807907104
 show_fps = true
-texture_cache_mb = 1024
+texture_cache_mb = 512
 upscale = 'fsr'
 vignette = 0.0
 vsync = false

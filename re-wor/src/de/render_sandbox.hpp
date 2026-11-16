@@ -1,7 +1,12 @@
 // Sandbox de render: pasada propia en la GPU con los efectos del editor (ver render_sandbox.cpp).
 #pragma once
 
+namespace rex::graphics {
+struct GpuStats;
+}
+
 namespace re_wor::de::sandbox {
+const rex::graphics::GpuStats* GpuStats();   // medidas del plugin de GPU (nullptr si no esta cargado)
 void Install();        // registra los ganchos de GPU (OnPostSetup; se reintenta desde OnLogicFrame)
 void OnLogicFrame();   // desde el frame logico del juego
 

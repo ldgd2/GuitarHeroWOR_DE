@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "core/crash_handler.hpp"
+#include "de/de_config.hpp"
 #include "de/mod_manager.hpp"
 
 namespace re_wor::de::edfx {
@@ -825,7 +826,7 @@ void UpdateGameCamera(uint8_t* base, double ms, const std::string& song) {
     }
     WriteCam(base + gc.addr, gc.p, k.p, gc.side_is_right, R, U, F, gc.rad ? k.hfov / 57.2957795f : k.hfov);
     wrote_now = true;
-    camwatch::ArmOnce(base, gc.addr);
+    if (re_wor::de::Get().perf.trace_probes) camwatch::ArmOnce(base, gc.addr);   // diagnostico: para todos los hilos 3 s
     std::memcpy(gc.p, k.p, sizeof(gc.p));
     std::memcpy(gc.U, U, sizeof(gc.U));
     std::memcpy(gc.F, F, sizeof(gc.F));

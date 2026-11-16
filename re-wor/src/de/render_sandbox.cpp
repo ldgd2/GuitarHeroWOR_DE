@@ -96,8 +96,6 @@ void AdoptLogicState() {
   }
 }
 
-uint32_t OnDraw(const rex::graphics::DrawHookInfo&) { return 0; }
-
 void BeforePass(const rex::graphics::SandboxPassInfo& info) {
   g_gpu_consts[0] = static_cast<float>(info.width);
   g_gpu_consts[1] = static_cast<float>(info.height);
@@ -282,7 +280,8 @@ bool Compose(const std::vector<edfx::FxState>& list, float T, std::array<float, 
   auto mark = [&](float v) { if (v != 0) any = true; return v; };
 
   // ---- look del jugador (pestana Graficos): va primero, los efectos del editor se aplican encima ----
-  const GraphicsConfig& U = Get().graphics;
+  GraphicsConfig U = Get().graphics;
+  if (!U.post_fx) U.bloom = U.glow = U.blur = U.brightness = U.contrast = U.saturation = U.vignette = U.grain = 0;
   if (U.LookActive()) any = true;
 
   // ---- cadena de filtros (mismo orden que `filt` en fx.js) ----
@@ -449,6 +448,8 @@ void CheckShaderFile() {
 
 }  // namespace
 
+const rex::graphics::GpuStats* GpuStats() { return g_hooks ? &g_hooks->stats : nullptr; }
+
 // La GPU es un plugin (rexgpu-xenos*.dll) que el runtime carga en tiempo de ejecucion: los ganchos se piden a la DLL.
 void Install() {
   if (g_installed || g_tries > 600) return;
@@ -464,7 +465,7 @@ void Install() {
       return;
     }
     g_hooks = fn();
-    g_hooks->draw = &OnDraw;
+    g_hooks->draw = nullptr;   // nada que hacer por draw: sin gancho el SDK no prepara datos en cada uno
     g_hooks->resolve = &OnResolve;
     g_hooks->swap = &OnSwap;
     g_hooks->log = &OnLog;

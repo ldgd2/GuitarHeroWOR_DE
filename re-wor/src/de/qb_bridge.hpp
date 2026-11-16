@@ -74,6 +74,8 @@ bool ScriptsLoaded();
 // Globales enteras (las usa el menu Options > Graphics del juego). false si no existe o no es entera.
 bool ReadIntGlobal(const std::string& name, uint8_t* base, int* out);
 bool WriteIntGlobal(const std::string& name, uint8_t* base, int value);
+bool WriteFloatGlobal(const std::string& name, uint8_t* base, float value);
+void ApplyEngineLimitsPatches(uint8_t* base);
 
 // Valor actual de una global para mostrarlo ("30 (entero)"; vacio si no existe). Solo lee memoria.
 std::string PeekGlobal(const std::string& name, uint8_t* base);

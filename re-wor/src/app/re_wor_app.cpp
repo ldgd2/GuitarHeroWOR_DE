@@ -144,6 +144,21 @@ void ReWorApp::OnPreSetup(rex::RuntimeConfig& config) {
   if (gfx.async_pipeline_compile) {
     rex::cvar::SetFlagByName("d3d12_pipeline_creation_threads", "-1");
   }
+  // Idioma del juego: lo que el sistema le dice (XGetLanguage / XConfig). 1 en, 3 de, 4 fr, 5 es, 6 it
+  {
+    const std::string lang = re_wor::de::Get().game.language;
+    const char* id = lang == "es" ? "5" : lang == "fr" ? "4" : lang == "de" ? "3" : lang == "it" ? "6" : "1";
+    // variables de entorno del proceso: las lee la DLL del SDK (xam_info.cpp, content_manager.cpp)
+    const bool ok_lang = SetEnvironmentVariableA("REWOR_LANGUAGE", id) != 0;
+    // WoR llama a la partida con el texto traducido (qs 0x7235ca15): sin esto, cada idioma tendria su propia
+    // partida vacia. En disco siempre es "Progress" (la de ingles).
+    const char* save = lang == "es" ? "Progreso" : lang == "fr" ? "Progression" : lang == "de" ? "Fortschritt"
+                     : lang == "it" ? "Progressione" : "";
+    const bool ok_save =
+        SetEnvironmentVariableA("REWOR_SAVEGAME_ALIAS", *save ? (std::string(save) + "=Progress").c_str() : nullptr) != 0 ||
+        !*save;
+    TRACE("[Idioma] " << lang << " (XGetLanguage = " << id << ")" << (ok_lang && ok_save ? "" : " - el SDK no acepto el ajuste"));
+  }
   // Opciones graficas del panel (pestana Graficos): todas son de arranque en el SDK
   re_wor::de::ApplyDisplayOptions(gfx);
   rex::cvar::SetFlagByName("d3d12_readback_resolve", "false");
@@ -324,8 +339,11 @@ void ReWorApp::OnCreateDialogs(rex::ui::ImGuiDrawer* imgui) {
     }
   }
 #endif
-  // Arrancar en modo ventana por defecto (permite ver la consola y evita pantalla negra fija)
-  window()->SetFullscreen(false);
+  // Modo de pantalla elegido en Options > Graphics (0 ventana, 1 sin bordes, 2 exclusiva).
+  // Antes se forzaba ventana aqui y la opcion no servia de nada.
+  window()->SetFullscreen(re_wor::de::Get().graphics.window_mode > 0);
+  TRACE("[Graficos] ventana: modo " << re_wor::de::Get().graphics.window_mode << ", resolucion '"
+        << re_wor::de::Get().graphics.resolution << "'");
 }
 
 void ReWorApp::OnGuestThreadExit(rex::system::XThread* thread) {

@@ -49,6 +49,20 @@ struct SandboxPassInfo {   // lo rellena el SDK en cada pasada (para el juego)
   uint32_t tex_width = 0, tex_height = 0;   // tamano real de la textura del RT (>= width/height: pitch de EDRAM)
 };
 
+// Medidas del procesador de comandos (las publica el SDK cada segundo; el juego solo lee).
+// Una "espera" es el hilo de GPU parado hasta que la tarjeta termina: cada una es un tiron.
+struct GpuStats {
+  uint32_t seq = 0;              // sube cada vez que se publica una ventana nueva
+  uint32_t frames = 0;           // swaps del juego en la ventana
+  uint32_t draws = 0, resolves = 0;
+  uint32_t stalls = 0;           // esperas a la GPU
+  float window_ms = 0.f;         // duracion real de la ventana
+  float stall_ms = 0.f;          // tiempo total parado esperando a la GPU
+  float worst_stall_ms = 0.f;
+  float worst_frame_ms = 0.f;    // frame mas largo (entre dos swaps)
+  float last_frame_ms = 0.f;
+};
+
 struct DrawHooks {
   DrawHookFn draw = nullptr;
   ResolveHookFn resolve = nullptr;
@@ -61,6 +75,7 @@ struct DrawHooks {
   uint32_t constant_count = 0;         // <= 256
   uint32_t particle_instances = 0;
   void (*before_pass)(const SandboxPassInfo& info) = nullptr;   // ultima oportunidad de ajustar constants
+  GpuStats stats;   // lo escribe el SDK
 };
 DrawHooks& GetDrawHooks();
 

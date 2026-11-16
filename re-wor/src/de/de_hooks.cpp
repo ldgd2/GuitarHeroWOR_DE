@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <cstring>
 #include <string>
 
@@ -24,6 +25,7 @@
 #include "de/cam_watch.hpp"
 #include "de/mod_manager.hpp"
 #include "de/qb_bridge.hpp"
+#include "de/frame_pacing.hpp"
 #include "de/gfx_options.hpp"
 #include "generated/re_wor_pch.h"
 
@@ -36,6 +38,8 @@ std::atomic<bool> g_log_opens{false};
 std::atomic<bool> g_trace_probes{false};
 std::atomic<double> g_audio_rate{0.0};
 std::atomic<double> g_logic_fps{0.0};
+std::atomic<double> g_dt_rate{0.0};   // segundos de juego por segundo real (1 = velocidad normal)
+std::atomic<double> g_dt_avg{0.0};    // dt medio que usa el motor
 std::atomic<double> g_audio_ms{0.0};
 }  // namespace
 
@@ -46,6 +50,9 @@ uint64_t GameFrameCount() {
 double GameFps() {
   return g_fps.load();
 }
+
+double EngineTimeRate() { return g_dt_rate.load(); }
+double EngineDtAvg() { return g_dt_avg.load(); }
 
 double LogicFps() {
   return g_logic_fps.load();
@@ -153,12 +160,141 @@ extern "C" REX_FUNC(sub_8272E6F0) {
 }
 
 // Bucle principal del motor (sub_823F2A88): 8242AD60 (tiempo/espera al render) -> ... -> 823F2710 (tareas: scripts,
-// camaras...) -> ... -> 82434D40 (cierre del frame). La camara de las tomas del editor se calcula tras 8242AD60, pero
-// el motor la recalcula despues en sus tareas: se vuelve a poner tras 823F2710 y antes de 82434D40 (y de 8242AD60).
+// camaras...) -> ... -> 82434D40 (cierre del frame).
 extern "C" void __imp__sub_823F2710(PPCContext& __restrict ctx, uint8_t* base);
 extern "C" REX_FUNC(sub_823F2710) {
   __imp__sub_823F2710(ctx, base);
   re_wor::de::edfx::ReapplyCamera(base, 0);
+}
+
+// Reloj de las canciones: el script suma 1/60 s por frame con IncrementSongTimer (0x823D0BC8; medido: a 144 FPS
+// sin candados la cancion iba a 2,41x). frame_pacing lo pasa a tiempo real cuando los FPS van por encima de 60.
+extern "C" void __imp__sub_823D0BC8(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_823D0BC8) {
+  const uint64_t bits = (uint64_t(REX_LOAD_U32(0x82993A58)) << 32) | REX_LOAD_U32(0x82993A5C);
+  double before;
+  std::memcpy(&before, &bits, 8);
+  __imp__sub_823D0BC8(ctx, base);
+  re_wor::de::frame_pacing::AdjustSongTimer(base, before);
+}
+// Reloj nativo de la cancion: sub_823D1490 (lo llama sub_821E51A0 cada frame) suma frames x 1/60 s al reloj
+// 0x82993A58. Es el que de verdad mueve la cancion (a 144 FPS iba a 2,41x).
+extern "C" void __imp__sub_823D1490(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_823D1490) {
+  const uint64_t bits = (uint64_t(REX_LOAD_U32(0x82993A58)) << 32) | REX_LOAD_U32(0x82993A5C);
+  double before;
+  std::memcpy(&before, &bits, 8);
+  __imp__sub_823D1490(ctx, base);
+  re_wor::de::frame_pacing::AdjustNativeSongClock(base, before);
+}
+
+// =============================================================================
+// Parche en Memoria de Limites de Motor Xbox 360 (In-Memory Engine Patch)
+// =============================================================================
+// Neversoft diseno el motor para los 512 MB de la Xbox 360, recortando
+// distancias de dibujado (default_far_plane_distance = 300), buffers de nodos,
+// oclusores (cull_max_occluder = 256) y luces. En planos generales de estadios
+// estos buffers se desbordan, provocando caidas severas de FPS y desaparicion de objetos.
+//
+// Para no modificar ni corromper los archivos de fabrica (.qb.xen) y que el proyecto
+// funcione limpiamente para cualquiera, interceptamos LoadFile (sub_824DA068).
+// Cuando el juego carga 'scripts/engine/engine_params.qb.xen', sobreescribimos
+// en caliente en RAM los 22 parametros con los valores ampliados de PC de 64-bit.
+// =============================================================================
+
+namespace {
+void PatchEngineParamsInMemory(uint8_t* data, size_t size) {
+  if (!data || size < 1500) return;
+
+  struct PatchInt { uint32_t key; uint32_t val; };
+  static const PatchInt kIntPatches[] = {
+      {0x4b642ed1, 1500},      // default_far_plane_distance
+      {0x877c2aaf, 1500},      // cull_max_instances
+      {0xc1331ede, 3500},      // cull_max_geom
+      {0x8712ac22, 512},       // cull_max_occluder
+      {0x64f3df41, 32},        // max_streams
+      {0x5896fb30, 3072},      // max_sound_entries
+      {0x4f90c3e4, 128},       // num_sound_instances
+      {0xe50baccf, 2048},      // pool_text_instances
+      {0xae3cd7c4, 25165824},  // fmod_memory_size
+      {0x80f1090c, 40000},     // cpu_skinning_buffer_size
+      {0x9ffd6a92, 15000},     // cpu_skin_wrap_buffer_size
+      {0xd71f4e67, 600},       // node_instances_buff
+      {0xc595b0e7, 500},       // node_statics_buff
+      {0xc7c8e585, 512},       // node_sort_buff
+      {0xdd014c76, 4000},      // node_misc_buff
+      {0x862259a1, 600},       // node_2d_buff
+      {0x3a77b43a, 2500},      // node_particle_buff
+      {0xca2f1e1c, 512},       // node_particle_node
+      {0xef2aeaf0, 300},       // node_light_buff
+      // target_ntsc_framerate y gpu_vsync_time_interval NO se tocan: son la temporizacion del motor y los FPS
+      // altos los gestiona frame_pacing sin cambiar la velocidad del juego.
+  };
+
+  int applied = 0;
+  for (const auto& p : kIntPatches) {
+    uint8_t key_bytes[4] = {
+        uint8_t(p.key >> 24), uint8_t(p.key >> 16),
+        uint8_t(p.key >> 8),  uint8_t(p.key)
+    };
+    for (size_t i = 0; i + 8 <= size; i += 4) {
+      if (std::memcmp(data + i, key_bytes, 4) == 0) {
+        data[i + 4] = uint8_t(p.val >> 24);
+        data[i + 5] = uint8_t(p.val >> 16);
+        data[i + 6] = uint8_t(p.val >> 8);
+        data[i + 7] = uint8_t(p.val);
+        applied++;
+        break;
+      }
+    }
+  }
+
+  // cull_smallobj (float 0.000001f en BE IEEE-754: 0x358637bd)
+  const uint32_t smallobj_key = 0x5ca62f8f;
+  const uint32_t smallobj_val = 0x358637bd;
+  uint8_t so_key[4] = {
+      uint8_t(smallobj_key >> 24), uint8_t(smallobj_key >> 16),
+      uint8_t(smallobj_key >> 8),  uint8_t(smallobj_key)
+  };
+  for (size_t i = 0; i + 8 <= size; i += 4) {
+    if (std::memcmp(data + i, so_key, 4) == 0) {
+      data[i + 4] = uint8_t(smallobj_val >> 24);
+      data[i + 5] = uint8_t(smallobj_val >> 16);
+      data[i + 6] = uint8_t(smallobj_val >> 8);
+      data[i + 7] = uint8_t(smallobj_val);
+      applied++;
+      break;
+    }
+  }
+
+  // Draw distance floats [600.0, 1000.0] -> [1800.0, 3500.0]
+  uint8_t old_draw[8] = {0x44, 0x16, 0x00, 0x00, 0x44, 0x7a, 0x00, 0x00};
+  uint8_t new_draw[8] = {0x44, 0xe1, 0x00, 0x00, 0x45, 0x5a, 0xc0, 0x00};
+  for (size_t i = 0; i + 8 <= size; i += 4) {
+    if (std::memcmp(data + i, old_draw, 8) == 0) {
+      std::memcpy(data + i, new_draw, 8);
+      applied++;
+      break;
+    }
+  }
+
+  TRACE("[DE::Hook] In-memory patch para engine_params.qb.xen aplicado: " << applied << "/20 limites mejorados en RAM!");
+}
+}  // namespace
+
+extern "C" void __imp__sub_824DA068(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_824DA068) {
+  const uint32_t name_addr = ctx.r3.u32;
+  const char* rel_path = name_addr ? reinterpret_cast<const char*>(base + name_addr) : "";
+  const uint32_t out_size_ptr = ctx.r4.u32;
+
+  __imp__sub_824DA068(ctx, base);
+
+  const uint32_t buf = ctx.r3.u32;
+  if (buf != 0 && rel_path && std::strstr(rel_path, "engine_params") != nullptr) {
+    uint32_t file_size = out_size_ptr ? REX_LOAD_U32(out_size_ptr) : 23524;
+    PatchEngineParamsInMemory(base + buf, file_size);
+  }
 }
 extern "C" void __imp__sub_82434D40(PPCContext& __restrict ctx, uint8_t* base);
 extern "C" REX_FUNC(sub_82434D40) {
@@ -193,11 +329,15 @@ extern "C" REX_FUNC(sub_8242AD60) {
   static clock::time_point s_prev = clock::now();
   static uint64_t s_tb_start = REX_QUERY_TIMEBASE();
 
+  re_wor::de::frame_pacing::BeforeEngineFrame();   // FPS altos: limitador (ver frame_pacing.hpp)
   auto t0 = clock::now();
   double wall_ms = std::chrono::duration<double, std::milli>(t0 - s_prev).count();
   s_prev = t0;
   re_wor::de::edfx::ReapplyCamera(base, 2);   // antes de la espera al hilo de render
+  const auto t_wait = clock::now();
   __imp__sub_8242AD60(ctx, base);
+  re_wor::de::frame_pacing::NoteEngineWait(std::chrono::duration<double, std::milli>(clock::now() - t_wait).count());
+  re_wor::de::frame_pacing::AfterEngineFrame(base);   // candados del motor y velocidad 1,00x
   re_wor::de::OnLogicFrameExtras(ctx, base);
 
   uint64_t bits = (uint64_t(REX_LOAD_U32(0x829BB2E0)) << 32) | REX_LOAD_U32(0x829BB2E4);
@@ -210,6 +350,8 @@ extern "C" REX_FUNC(sub_8242AD60) {
   double secs = std::chrono::duration<double>(clock::now() - s_start).count();
   if (secs >= 2.0) {
     re_wor::de::g_logic_fps.store(s_frames / secs);
+    re_wor::de::g_dt_rate.store(s_dt_sum / secs);
+    re_wor::de::g_dt_avg.store(s_dt_sum / s_frames);
     uint64_t tb_now = REX_QUERY_TIMEBASE();
     double guest_mhz = (tb_now - s_tb_start) / secs / 1e6;
     s_tb_start = tb_now;
@@ -385,7 +527,9 @@ void OnLogicFrameExtras(PPCContext& ctx, uint8_t* base) {
   sandbox::OnLogicFrame();
   camwatch::Tick();   // vigia de la camara (diagnostico, una vez)
   qb_bridge::OnLogicFrame(ctx, base);
-  SyncGameMenu(base);   // Options > Graphics del juego <-> [graphics]
+  SyncGameMenu(base);
+  TickDisplayConfirm(qb_bridge::ScriptsLoaded() ? base : nullptr);
+  PerfTick();   // Options > Graphics del juego <-> [graphics]
 }
 }  // namespace re_wor::de
 #endif

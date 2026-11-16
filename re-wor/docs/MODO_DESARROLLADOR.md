@@ -73,18 +73,70 @@ En el menú de opciones del juego hay una entrada nueva, **Graphics**, que se ma
 
 | Opción | Valores | Se aplica |
 |---|---|---|
-| Resolution | Desktop, 720p, 1080p, 1440p, 4K | al reiniciar (*) |
-| Display Mode | Windowed, Borderless, Fullscreen | al reiniciar (*) |
-| Frame Rate | 60 a 240 FPS (frecuencia del juego; más de 60 es experimental) | al reiniciar (*) |
-| VSync | Off / On (sincroniza con el monitor) | al momento |
-| Show FPS | Off / On (contador en la esquina) | al momento |
+| Quality Preset | Low, Medium, High, Ultra (Custom si se toca algo a mano) | según la opción |
+| Graphics API | Direct3D 12, Vulkan | al reiniciar (*) |
+| Resolution | Desktop, 720p, 1080p, 1440p, 4K | al momento, con 10 s para confirmar |
+| Display Mode | Windowed, Borderless, Fullscreen | al momento, con 10 s para confirmar |
+| Frame Rate | 60 a 240 FPS; la velocidad del juego no cambia | al momento |
+| VSync | Off / On | al momento |
+| Show FPS | Off, On, Detailed (tiempo de frame, esperas a la GPU, draws) | al momento |
 | Render Resolution | 1x a 4x | al reiniciar (*) |
-| Anti-Aliasing | Off / MSAA 2x | al reiniciar (*) |
-| Upscaling, Sharpness | Bilinear, AMD CAS, AMD FSR 1; nitidez 0-10 | al reiniciar (*) |
+| Anti-Aliasing | Off, FXAA, MSAA 2x, MSAA 2x + FXAA | FXAA al momento, MSAA al reiniciar |
+| Texture Filtering | Trilinear, Anisotropic 2x a 16x | al reiniciar (*) |
+| Post-Processing | Off / On (apagado ahorra una pasada a pantalla completa) | al momento |
 | Bloom, Glow, Blur, Brightness, Contrast, Saturation, Vignette, Film Grain | 0-10 (o -5 a 5) | al momento, en el escenario durante las canciones |
-| Reset to Defaults | | |
+| Reset to Defaults | preset High | |
+
+Los presets **no tocan la resolución ni la pantalla**:
+
+| Preset | Anti-Aliasing | Filtrado | Post-proceso | Caché de texturas |
+|---|---|---|---|---|
+| Low | Off | Trilinear | Off | 512 MB |
+| Medium | FXAA | 4x | On | 1024 MB |
+| High | MSAA 2x | 8x | On | 1024 MB |
+| Ultra | MSAA 2x + FXAA | 16x | On | 2048 MB |
+
+**API gráfica:** el plugin de GPU se compila con Direct3D 12 y Vulkan. Si Vulkan no puede presentar en la tarjeta, el SDK vuelve solo a Direct3D 12. Los efectos de imagen propios (bloom, glow...) y las medidas de rendimiento solo existen en Direct3D 12. Direct3D 11 no existe en el SDK: emular la EDRAM del Xenos necesita funciones que D3D11 no tiene.
+
+## Resolución y frecuencia al momento
+
+- **Resolución y modo de pantalla** se aplican al momento. Aparece un aviso con una cuenta atrás de 10 s: Enter o A mantiene, Esc o B vuelve. Si no se pulsa nada, se vuelve sola a la anterior. El `.toml` solo cambia al confirmar.
+- **La resolución son píxeles reales:** el SDK ya no la multiplica por la escala de Windows, y la ventana nunca es más grande que la pantalla (`window_sdl.cpp`).
+- **Frame Rate (`src/de/frame_pacing.cpp`):** los FPS no cambian la velocidad del juego.
+  - El motor tiene dos candados, las globales `game_lock_framerate` y `render_lock_framerate`, que lo fijan a 60. Con más de 60, re-wor los quita y limita él mismo el bucle del motor a la frecuencia elegida (sin límite iría a 700+ FPS).
+  - Sin candados, el tiempo de frame del motor (`0x8285684C`, `GetDeltaTime`) ya es tiempo real. El reloj de la canción (`0x82993A58`), que mueve notas y highway, no: el motor (`sub_823D1490`) y el script (`IncrementSongTimer`) lo avanzan por frames (a 144 FPS iba a 2,41x). Con FPS altos, cada avance se sustituye por el tiempo real transcurrido desde el anterior × slomo (los frames en los que el juego suma 0 no pierden su tiempo) (`0x82856844`, lo que devuelve `GetSlomo`), igual que el audio, sin depender de cuántos frames haya. Pausas, saltos y la cuenta atrás se dejan como los hace el juego.
+  - Canciones custom: `SongFileManager` (CFunc `0x821AF560`) pedía secciones que la canción no tiene y el motor original leía basura de la pila (crash en `sub_821AE590 + 0x213`). `src/de/engine_fixes.cpp` cancela esa petición y lo apunta como `[Arreglos]` en `re_wor_trace.log`.
+  - Dentro de una canción se escribe en `re_wor_trace.log` una línea `[FPS] en cancion` cada 2 s (máximo 600) con FPS, velocidad del juego y de la canción, slomo y candados.
+  - El VBlank del SDK y `XGetVideoMode` se quedan en 60 Hz, como en la consola.
+  - Protección: cada 2 s se mide la velocidad del motor (segundos de juego por segundo real). Si con FPS altos se sale de 0,9–1,1 dos veces seguidas, vuelve sola a 60 con candados y lo apunta en `re_wor_trace.log`. Cambiar el Frame Rate en el menú lo vuelve a intentar.
+  - `python tools/qb.py fps` y el contador de FPS en modo Detallado muestran la velocidad del juego y de la canción (deben ser 1,00x).
+- **CAS / FSR:** se quitaron del menú porque el SDK está compilado sin FidelityFX y solo tiene escalado bilineal.
+
+## Rendimiento
+
+- **Cvars de GPU perdidas (arreglado):** las opciones gráficas se ponían en `OnPreSetup`, antes de cargar el plugin de GPU. El SDK rechazaba en silencio las cvars que aún no existían: MSAA, escala de render, caché de texturas, hilos de shaders... Ahora `SetFlagByName` guarda el valor y lo aplica cuando el plugin registra la cvar (`src/core/cvar.cpp` del SDK).
+- **Diagnóstico de cámara:** el vigía `cam_watch` paraba todos los hilos del juego para poner puntos de interrupción la primera vez que el editor movía la cámara. Ahora solo se activa con `[performance] trace_probes = true`.
+- **Gancho por draw:** se quitó, porque no hacía nada y el SDK preparaba datos en cada draw.
+- **Medidas:** el procesador de comandos D3D12 cuenta frames, draws, resolves y esperas a la GPU, y las publica cada segundo en `DrawHooks::stats`. Con Show FPS = Detailed se ven en pantalla. Cada tirón (un frame de más de 40 ms y 2,5 veces la media) se apunta en `re_wor_trace.log` como `[Perf] tiron: ...`, con las esperas a la GPU de ese segundo.
 
 Todo se guarda en `[graphics]` de `re_wor_de.toml`. Son los mismos valores que la pestaña Gráficos del panel F8.
+
+## Público (Options > Graphics > Crowd)
+
+`[graphics] crowd`: 0 None, 1 Low (solo las filas 3D de delante), 2 Medium (solo el público 2D del fondo), 3 High (el original). Se aplica al momento durante la canción (`qb/crowd.q`, `SyncCrowd` en `gfx_options.cpp`). Oculta con lo mismo que el script del juego `hide_crowd_models`. No usa `disable_crowd`: cargar el escenario sin público cierra el juego (Access Violation en `sub_82406D60`).
+
+## Idioma (Options > Language)
+
+WoR trae los textos en cinco idiomas: `pak/qs.pak` (inglés), `qs_s` (español), `qs_f` (francés), `qs_g` (alemán) y `qs_i` (italiano), más las pantallas de carga con texto (`*_s.img`...). `[game] language` (`en`, `es`, `fr`, `de`, `it`) elige cuál. Se cambia en el menú de opciones del juego (Language) o en el panel F8 (Gráficos > Idioma), y se aplica al reiniciar: sale un aviso.
+
+- **Motor** (`src/de/language.cpp`): el idioma es una clave en `0x82860430`. De ella salen el sufijo de los archivos (`sub_82403230`) y el nombre del idioma (`sub_82403310`). La pone `sub_824AD288` al arrancar y la cambia `SetConfig`. re-wor la fija al idioma elegido.
+- **Sistema** (`xam_info.cpp` del SDK): `XGetLanguage` devuelve el idioma de la variable de entorno `REWOR_LANGUAGE`. Antes devolvía siempre inglés.
+- **Partida guardada:** WoR usa como nombre de archivo de la partida el texto traducido (qs `0x7235ca15`: Progress, Progreso, Progression, Fortschritt, Progressione). Sin arreglo, cada idioma crearía su propia partida vacía. `REWOR_SAVEGAME_ALIAS` (p. ej. `Progreso=Progress`) hace que en disco sea siempre `Progress` y que el juego vea el nombre de su idioma (`content_manager.cpp` del SDK). Un `CREATE_ALWAYS` con el nombre traducido nunca borra la partida (`xam_content.cpp`).
+- Se usan variables de entorno porque el ejecutable y la DLL del SDK tienen cada uno su registro de cvars: una cvar puesta desde el juego no llega a la DLL.
+
+## Aviso de reinicio
+
+Al salir de Options > Graphics con cambios que se aplican al reiniciar (API, resolución de render, MSAA, filtrado...), o al elegir otro idioma, sale un cuadro del juego (`create_dialog_box`) que lo avisa (`re_restart_popup` en `qb/options_graphics.q`).
 
 ## Cómo está hecho
 

@@ -2,6 +2,8 @@
 // stubs.cpp - Xbox 360 API stubs for GH:WoR PC recompilation
 // =============================================================================
 
+#include <algorithm>
+#include <rex/cvar.h>
 #include "diagnostics/stubs.hpp"
 #include "diagnostics/stub_tracker.hpp"
 #include "input/input_manager.hpp"
@@ -149,8 +151,8 @@ extern "C" REX_FUNC(__imp__XGetVideoMode) {
   rex::memory::store_and_swap<uint32_t>(base + mode_addr + 0x0C, 1);     // Widescreen
   rex::memory::store_and_swap<uint32_t>(base + mode_addr + 0x10, 1);     // HiDef
 
-  // RefreshRate = 60.0f. El motor usa este valor para su temporizacion;
-  // reportar 144 Hz rompe el ritmo de frames/vsync del juego original.
+  // RefreshRate = 60.0f, como la consola. El motor cuenta el tiempo de parte del juego en VBlanks de 1/60 s;
+  // los FPS altos (Options > Graphics > Frame Rate) no pasan por aqui: ver gfx_options.cpp (FrameCapHz).
   rex::memory::store_and_swap<uint32_t>(base + mode_addr + 0x14, 0x42700000u);
 
   rex::memory::store_and_swap<uint32_t>(base + mode_addr + 0x18, 1);     // NTSC

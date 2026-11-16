@@ -134,6 +134,11 @@ void Load() {
       rd("skip_intro", c.hotkeys.skip_intro);
       rd("debug_menu", c.hotkeys.debug_menu);
     }
+    if (auto game = tbl["game"].as_table()) {
+      c.game.language = (*game)["language"].value_or(c.game.language);
+      if (c.game.language != "es" && c.game.language != "fr" && c.game.language != "de" && c.game.language != "it")
+        c.game.language = "en";
+    }
     if (auto perf = tbl["performance"].as_table()) {
       c.perf.trace_probes = (*perf)["trace_probes"].value_or(c.perf.trace_probes);
       c.perf.above_normal_priority =
@@ -155,6 +160,14 @@ void Load() {
       g.refresh_hz = static_cast<int>((*gfx)["refresh_hz"].value_or(g.refresh_hz));
       g.upscale = (*gfx)["upscale"].value_or(g.upscale);
       g.msaa2x = (*gfx)["msaa2x"].value_or(g.msaa2x);
+      g.fxaa = (*gfx)["fxaa"].value_or(g.fxaa);
+      g.aniso = std::clamp(static_cast<int>((*gfx)["aniso"].value_or(g.aniso)), 0, 4);
+      g.post_fx = (*gfx)["post_fx"].value_or(g.post_fx);
+      g.perf_detail = (*gfx)["perf_detail"].value_or(g.perf_detail);
+      if (g.backend != "vulkan") g.backend = "d3d12";
+      // preset guardado; si falta (configuracion vieja) se deduce de los valores
+      g.preset = (*gfx)["preset"] ? std::clamp(static_cast<int>((*gfx)["preset"].value_or(4)), 0, 4) : g.MatchPreset();
+      if (g.preset < 4 && g.MatchPreset() != g.preset) g.preset = 4;
       g.letterbox = (*gfx)["letterbox"].value_or(g.letterbox);
       g.vsync = (*gfx)["vsync"].value_or(g.vsync);
       g.show_fps = (*gfx)["show_fps"].value_or(g.show_fps);
@@ -170,6 +183,7 @@ void Load() {
       rf("vignette", g.vignette, 0, 1);
       rf("grain", g.grain, 0, 1);
       rf("blur", g.blur, 0, 1);
+      g.crowd = std::clamp(static_cast<int>((*gfx)["crowd"].value_or(g.crowd)), 0, 3);
       g.window_mode = std::clamp(g.window_mode, 0, 2);
       g.refresh_hz = std::clamp(g.refresh_hz, 30, 240);
     }
@@ -233,6 +247,11 @@ bool Save() {
                   {"upscale", c.graphics.upscale},
                   {"sharpness", static_cast<double>(c.graphics.sharpness)},
                   {"msaa2x", c.graphics.msaa2x},
+                  {"fxaa", c.graphics.fxaa},
+                  {"aniso", c.graphics.aniso},
+                  {"post_fx", c.graphics.post_fx},
+                  {"preset", c.graphics.preset},
+                  {"perf_detail", c.graphics.perf_detail},
                   {"letterbox", c.graphics.letterbox},
                   {"vsync", c.graphics.vsync},
                   {"show_fps", c.graphics.show_fps},
@@ -243,7 +262,8 @@ bool Save() {
                   {"saturation", static_cast<double>(c.graphics.saturation)},
                   {"vignette", static_cast<double>(c.graphics.vignette)},
                   {"grain", static_cast<double>(c.graphics.grain)},
-                  {"blur", static_cast<double>(c.graphics.blur)}};
+                  {"blur", static_cast<double>(c.graphics.blur)},
+                  {"crowd", c.graphics.crowd}};
 
   toml::table hotkeys{{"panel", c.hotkeys.panel},
                       {"fullscreen", c.hotkeys.fullscreen},
@@ -255,6 +275,7 @@ bool Save() {
                       {"debug_menu", c.hotkeys.debug_menu}};
 
   toml::table root;
+  root.insert("game", toml::table{{"language", c.game.language}});
   root.insert("performance", std::move(perf));
   root.insert("hotkeys", std::move(hotkeys));
   root.insert("input", std::move(input));

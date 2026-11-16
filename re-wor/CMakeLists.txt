@@ -59,6 +59,9 @@ set(REWOR_SOURCES
     src/de/de_panel.cpp
     src/de/qb_bridge.cpp
     src/de/gfx_options.cpp
+    src/de/frame_pacing.cpp
+    src/de/engine_fixes.cpp
+    src/de/language.cpp
     src/de/edfx.cpp
     src/de/native_fx.cpp
     src/de/render_sandbox.cpp
@@ -166,6 +169,15 @@ if(TARGET rexgpu-xenos)
     add_custom_command(TARGET re_wor POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rexgpu-xenos> $<TARGET_FILE_DIR:re_wor>
         COMMENT "Copiando el plugin de GPU junto al juego")
+endif()
+# Las DLL del SDK cambian sin que el ejecutable se vuelva a enlazar (p. ej. un parche en kernel/xam): copiarlas
+# siempre que cambien, no solo cuando se enlaza el juego.
+if(TARGET rexruntime AND TARGET rexgpu-xenos)
+    add_custom_target(re_wor_sdk_dlls ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rexruntime> $<TARGET_FILE:rexgpu-xenos>
+                $<TARGET_FILE_DIR:re_wor>
+        DEPENDS re_wor rexruntime rexgpu-xenos
+        COMMENT "Copiando las DLL del SDK junto al juego")
 endif()
 
 # Scripts QB propios (qb/*.q): se compilan con tools/qbc.py en <carpeta del juego>/qb y el juego los

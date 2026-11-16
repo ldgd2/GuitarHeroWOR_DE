@@ -977,6 +977,41 @@ void DePanelDialog::DrawGraphicsTab() {
 
   ImGui::BeginChild("gfx_scroll", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 1.6f));
 
+  // ---------------------------------------------------------------- Idioma (textos del juego)
+  Section("Idioma");
+  {
+    static std::string boot_lang = cfg.game.language;   // el de este arranque
+    const char* labels[] = {"English", "Espanol", "Francais", "Deutsch", "Italiano"};
+    const char* codes[] = {"en", "es", "fr", "de", "it"};
+    int idx = 0;
+    for (int i = 0; i < 5; ++i) if (cfg.game.language == codes[i]) idx = i;
+    Row("Idioma del juego");
+    if (ImGui::Combo("##lang", &idx, labels, 5)) { cfg.game.language = codes[idx]; controls_dirty_ = true; }
+    RestartTag(cfg.game.language != boot_lang);
+    Hint("Los textos traducidos que trae el juego. La partida guardada es la misma en todos los idiomas.");
+  }
+
+  // ---------------------------------------------------------------- Calidad general
+  Section("Preset y API");
+  {
+    const char* labels[] = {"Low", "Medium", "High", "Ultra", "Custom"};
+    int idx = std::clamp(g.preset, 0, 4);
+    Row("Preset de calidad");
+    if (ImGui::Combo("##preset", &idx, labels, 5) && idx < 4) {
+      g.ApplyPreset(idx);
+      ApplyLiveDisplayOptions(g);
+      changed = true;
+    }
+    Hint("Cambia antialiasing, filtrado, post-proceso y cache de texturas. No toca la resolucion.");
+    const char* apis[] = {"Direct3D 12", "Vulkan"};
+    int aidx = g.backend == "vulkan" ? 1 : 0;
+    Row("API grafica");
+    if (ImGui::Combo("##api", &aidx, apis, 2)) { g.backend = aidx ? "vulkan" : "d3d12"; changed = true; }
+    RestartTag(g.backend != b.backend);
+    Hint("Si Vulkan no arranca en esta tarjeta, el juego vuelve solo a Direct3D 12. Los efectos de imagen "
+         "(bloom, glow...) solo funcionan con Direct3D 12.");
+  }
+
   // ---------------------------------------------------------------- Pantalla
   Section("Pantalla");
   {
@@ -986,14 +1021,14 @@ void DePanelDialog::DrawGraphicsTab() {
     int idx = 0;
     for (int i = 0; i < 5; ++i) if (g.resolution == vals[i]) idx = i;
     Row("Resolucion");
-    if (ImGui::Combo("##res", &idx, labels, 5)) { g.resolution = vals[idx]; changed = true; }
-    RestartTag(g.resolution != b.resolution);
+    // al momento, con 10 s para confirmar (el .toml cambia al confirmar)
+    if (ImGui::Combo("##res", &idx, labels, 5)) RequestDisplayChange(g.resolution, g.window_mode, vals[idx], g.window_mode);
   }
   {
     const char* labels[] = {"Ventana", "Pantalla completa (sin bordes)", "Pantalla completa exclusiva"};
     Row("Modo de pantalla");
-    if (ImGui::Combo("##wmode", &g.window_mode, labels, 3)) changed = true;
-    RestartTag(g.window_mode != b.window_mode);
+    int mode = g.window_mode;
+    if (ImGui::Combo("##wmode", &mode, labels, 3)) RequestDisplayChange(g.resolution, g.window_mode, g.resolution, mode);
     Hint("F11 alterna ventana y pantalla completa al momento.");
   }
   {
@@ -1002,8 +1037,11 @@ void DePanelDialog::DrawGraphicsTab() {
     int idx = 0;
     for (int i = 0; i < 6; ++i) if (g.refresh_hz == hz[i]) idx = i;
     Row("Frecuencia");
-    if (ImGui::Combo("##hz", &idx, labels, 6)) { g.refresh_hz = hz[idx]; changed = true; }
-    RestartTag(g.refresh_hz != b.refresh_hz);
+    if (ImGui::Combo("##hz", &idx, labels, 6)) {
+      g.refresh_hz = hz[idx];
+      ApplyLiveDisplayOptions(g);
+      changed = true;
+    }
     if (g.refresh_hz > 60) {
       ImGui::TextColored(kWarn, "Experimental: el juego se hizo para 60 Hz. Si notas animaciones o audio raros, vuelve a 60.");
     }
@@ -1017,6 +1055,8 @@ void DePanelDialog::DrawGraphicsTab() {
   ImGui::TextDisabled("al momento");
   Row("Contador de FPS");
   if (ImGui::Checkbox("##showfps", &g.show_fps)) changed = true;
+  ImGui::SameLine();
+  if (ImGui::Checkbox("Detallado (tiempos y esperas a la GPU)##pdet", &g.perf_detail)) changed = true;
   Row("Franjas si no es 16:9");
   if (ImGui::Checkbox("##lbox", &g.letterbox)) {
     ApplyLiveDisplayOptions(g);
@@ -1040,6 +1080,26 @@ void DePanelDialog::DrawGraphicsTab() {
   Row("Antialiasing");
   if (ImGui::Checkbox("MSAA 2x nativo##msaa", &g.msaa2x)) changed = true;
   RestartTag(g.msaa2x != b.msaa2x);
+  ImGui::SameLine();
+  if (ImGui::Checkbox("FXAA##fxaa", &g.fxaa)) {
+    ApplyLiveDisplayOptions(g);
+    changed = true;
+  }
+  {
+    const char* labels[] = {"Trilineal", "Anisotropico 2x", "Anisotropico 4x", "Anisotropico 8x",
+                            "Anisotropico 16x"};
+    Row("Filtrado de texturas");
+    if (ImGui::Combo("##aniso", &g.aniso, labels, 5)) changed = true;
+    RestartTag(g.aniso != b.aniso);
+  }
+  Row("Post-proceso");
+  if (ImGui::Checkbox("Efectos de imagen (seccion Imagen)##pfx", &g.post_fx)) changed = true;
+  {
+    const char* labels[] = {"Ninguno", "Bajo (filas 3D de delante)", "Medio (publico 2D del fondo)", "Alto (original)"};
+    Row("Publico");
+    if (ImGui::Combo("##crowd", &g.crowd, labels, 4)) changed = true;
+    Hint("Se aplica al momento durante la cancion.");
+  }
   {
     const char* labels[] = {"Bilineal (suave)", "AMD CAS (nitidez)", "AMD FSR 1 (reescalado)"};
     const char* vals[] = {"bilinear", "cas", "fsr"};
@@ -1133,29 +1193,23 @@ void DePanelDialog::DrawGraphicsTab() {
   // ---------------------------------------------------------------- pie
   ImGui::Separator();
   if (ImGui::Button("Valores por defecto")) {
-    const GraphicsConfig d;
-    g.resolution = d.resolution;
-    g.window_mode = d.window_mode;
-    g.refresh_hz = d.refresh_hz;
-    g.upscale = d.upscale;
-    g.sharpness = d.sharpness;
-    g.msaa2x = d.msaa2x;
-    g.letterbox = d.letterbox;
-    g.resolution_scale = d.resolution_scale;
-    g.vsync = d.vsync;
-    g.show_fps = d.show_fps;
-    g.bloom = g.glow = g.blur = g.brightness = g.contrast = g.saturation = g.vignette = g.grain = 0;
+    const std::string res = g.resolution;
+    const int mode = g.window_mode;
+    g = GraphicsConfig{};
+    g.resolution = res;   // la resolucion y el modo de pantalla se cambian arriba, con confirmacion
+    g.window_mode = mode;
     ApplyLiveDisplayOptions(g);
     changed = true;
   }
   ImGui::SameLine();
-  const bool pending = g.resolution != b.resolution || g.window_mode != b.window_mode || g.refresh_hz != b.refresh_hz ||
-                       g.upscale != b.upscale || g.sharpness != b.sharpness || g.msaa2x != b.msaa2x ||
-                       g.resolution_scale != b.resolution_scale || g.render_target_path != b.render_target_path ||
-                       g.texture_cache_mb != b.texture_cache_mb || g.async_pipeline_compile != b.async_pipeline_compile;
+  const bool pending = NeedsRestart(g) || g.render_target_path != b.render_target_path ||
+                       g.async_pipeline_compile != b.async_pipeline_compile;
   if (pending) ImGui::TextColored(kWarn, "Hay cambios que se aplican al reiniciar el juego.");
   else ImGui::TextDisabled("Se guarda en re_wor_de.toml ([graphics]).");
-  if (changed) controls_dirty_ = true;
+  if (changed) {
+    g.preset = g.MatchPreset();
+    controls_dirty_ = true;
+  }
 }
 
 }  // namespace re_wor::de

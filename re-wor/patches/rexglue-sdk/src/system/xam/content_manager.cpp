@@ -16,9 +16,17 @@
 
 #include <fmt/format.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+#include <cstdlib>
 #include <rex/filesystem.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/filesystem/devices/stfs_container_device.h>
+#include <rex/cvar.h>
 #include <rex/string.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/content_device.h>
@@ -26,9 +34,42 @@
 #include <rex/system/xfile.h>
 #include <rex/system/xobject.h>
 
+// re-wor: algunos juegos (WoR) usan el nombre traducido de la partida como nombre de archivo ("Progreso" en
+// espanol, "Progress" en ingles). Con "Progreso=Progress" el archivo es siempre el mismo en disco y el juego ve el
+// nombre de su idioma. Solo partidas guardadas (XContentType::kSavedGame).
+// El valor llega por la variable de entorno del proceso REWOR_SAVEGAME_ALIAS: el ejecutable del juego y esta DLL
+// tienen cada uno su registro de cvars, asi que una cvar puesta desde el juego no se ve aqui.
+REXCVAR_DEFINE_STRING(savegame_name_alias, "", "Kernel",
+                      "Nombre de partida del idioma actual = nombre en disco (p. ej. Progreso=Progress)");
+
+std::string ReWorSaveAlias() {
+  char buf[128] = {};
+  const unsigned long n = GetEnvironmentVariableA("REWOR_SAVEGAME_ALIAS", buf, sizeof(buf));
+  if (n > 0 && n < sizeof(buf)) return std::string(buf, n);
+  return REXCVAR_GET(savegame_name_alias);
+}
+
 namespace rex {
 namespace system {
 namespace xam {
+
+namespace {
+// first: nombre que usa el juego; second: nombre en disco
+std::pair<std::string, std::string> SaveAlias() {
+  const std::string v = ReWorSaveAlias();
+  const auto eq = v.find('=');
+  if (eq == std::string::npos || eq == 0 || eq + 1 >= v.size()) return {};
+  return {v.substr(0, eq), v.substr(eq + 1)};
+}
+
+std::string DiskName(std::string_view name, XContentType type) {
+  if (type == XContentType::kSavedGame) {
+    const auto a = SaveAlias();
+    if (!a.first.empty() && name == a.first) return a.second;
+  }
+  return std::string(name);
+}
+}  // namespace
 
 static const char* kThumbnailFileName = "__thumbnail.png";
 
@@ -111,7 +152,7 @@ std::filesystem::path ContentManager::ResolvePackagePath(uint64_t xuid,
   // Content path:
   // content_root/xuid/title_id/content_type/data_file_name/
   auto package_root = ResolvePackageRoot(used_xuid, data.content_type, data.title_id);
-  return package_root / rex::to_path(data.file_name());
+  return package_root / rex::to_path(DiskName(data.file_name(), data.content_type));
 }
 
 std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string_view file_name,
@@ -128,7 +169,7 @@ std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string
   auto xuid_str = fmt::format("{:016X}", xuid);
   auto title_id_str = fmt::format("{:08X}", title_id);
   auto content_type_str = fmt::format("{:08X}", uint32_t(content_type));
-  std::string final_name = std::string(file_name) + ".header";
+  std::string final_name = DiskName(file_name, content_type) + ".header";
 
   // Header root path:
   // content_root/xuid/title_id/Headers/content_type/filename.header
@@ -170,6 +211,18 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
     }
   }
 
+  // re-wor: la partida en disco se presenta con el nombre del idioma del juego
+  if (content_type == XContentType::kSavedGame) {
+    const auto a = SaveAlias();
+    if (!a.first.empty()) {
+      for (auto& c : result) {
+        if (c.file_name() == a.second) {
+          c.set_file_name(a.first);
+          c.set_display_name(rex::string::to_utf16(a.first));
+        }
+      }
+    }
+  }
   return result;
 }
 
@@ -198,6 +251,13 @@ X_RESULT ContentManager::WriteContentHeaderFile(uint64_t xuid, XCONTENT_AGGREGAT
   }
   uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
 
+  {
+    const std::string disk = DiskName(data.file_name(), data.content_type);
+    if (disk != data.file_name()) {
+      data.set_file_name(disk);
+      data.set_display_name(rex::string::to_utf16(disk));
+    }
+  }
   auto header_path =
       ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type);
   auto parent_path = header_path.parent_path();

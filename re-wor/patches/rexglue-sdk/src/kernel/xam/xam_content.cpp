@@ -22,6 +22,7 @@
 #include <rex/system/xenumerator.h>
 #include <rex/system/xtypes.h>
 
+std::string ReWorSaveAlias();   // content_manager.cpp
 REXCVAR_DEFINE_UINT32(license_mask, 0, "Kernel", "Set license mask for activated content");
 
 namespace rex {
@@ -103,6 +104,9 @@ u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id, u32 content_
     for (const auto& content_data : content_datas) {
       auto item = e->AppendItem();
       *item = content_data;
+      if (content_type == uint32_t(XContentType::kSavedGame)) {
+        XamTrace("  partida '{}' (alias '{}')", content_data.file_name(), ReWorSaveAlias());
+      }
     }
 
     // Also enumerate common content (xuid=0)
@@ -176,6 +180,14 @@ u32 xeXamContentCreate(u32 user_index, mapped_string root_name, mapped_void cont
         // Close any existing mount under this root name first.
         // Games may reuse the same root without explicitly closing.
         content_manager->CloseContent(root_name);
+        // re-wor: nunca borrar la partida por su nombre traducido (savegame_name_alias): se abre la que hay
+        if (content_data.content_type == XContentType::kSavedGame &&
+            ReWorSaveAlias().rfind(content_data.file_name() + "=", 0) == 0 &&
+            content_manager->ContentExists(xuid, content_data)) {
+          XamTrace("ContentCreate: CREATE_ALWAYS sobre '{}' (alias) -> se abre sin borrar", content_data.file_name());
+          disposition = kDispositionState::Open;
+          break;
+        }
         if (content_manager->ContentExists(xuid, content_data) &&
             content_manager->DeleteContent(xuid, content_data) != X_ERROR_SUCCESS) {
           result = X_ERROR_ACCESS_DENIED;

@@ -15,30 +15,41 @@
 //    un estado nuevo en el motor.
 hook ui_create_options ui_create_options_facebook ui_destroy_options_facebook ui_return_options_facebook
 
-int re_gfx_v0 = 0      // resolucion
-int re_gfx_v1 = 1      // modo de pantalla
-int re_gfx_v2 = 0      // frecuencia (FPS del juego)
-int re_gfx_v3 = 0      // VSync del monitor
-int re_gfx_v4 = 0      // contador de FPS
-int re_gfx_v5 = 0      // resolucion de render
-int re_gfx_v6 = 1      // antialiasing
-int re_gfx_v7 = 0      // escalado
-int re_gfx_v8 = 0      // nitidez
-int re_gfx_v9 = 0      // bloom
-int re_gfx_v10 = 0     // glow
-int re_gfx_v11 = 0     // blur
-int re_gfx_v12 = 5     // brillo (5 = neutro)
-int re_gfx_v13 = 5     // contraste
-int re_gfx_v14 = 5     // saturacion
-int re_gfx_v15 = 0     // vineta
-int re_gfx_v16 = 0     // grano
+int re_gfx_v0 = 2       // preset
+int re_gfx_v1 = 0       // API grafica
+int re_gfx_v2 = 0       // resolucion
+int re_gfx_v3 = 0       // modo de pantalla
+int re_gfx_v4 = 0       // frecuencia (FPS del juego)
+int re_gfx_v5 = 0       // VSync del monitor
+int re_gfx_v6 = 0       // contador de FPS (0 no, 1 si, 2 detallado)
+int re_gfx_v7 = 0       // resolucion de render
+int re_gfx_v8 = 2       // antialiasing (0 no, 1 FXAA, 2 MSAA 2x, 3 ambos)
+int re_gfx_v9 = 3       // filtrado de texturas
+int re_gfx_v10 = 1      // post-proceso
+int re_gfx_v11 = 0      // bloom
+int re_gfx_v12 = 0      // glow
+int re_gfx_v13 = 0      // blur
+int re_gfx_v14 = 5      // brillo (5 = neutro)
+int re_gfx_v15 = 5      // contraste
+int re_gfx_v16 = 5      // saturacion
+int re_gfx_v17 = 0      // vineta
+int re_gfx_v18 = 0      // grano
+int re_gfx_v19 = 3      // publico (0 ninguno .. 3 original)
 int re_gfx_active = 0  // 1 = el estado de options_facebook muestra la pantalla Graphics
 int re_gfx_reset = 0   // 1 = valores por defecto (re-wor lo vuelve a 0)
 int re_gfx_pending = 0 // 1 = hay cambios que se aplican al reiniciar (lo escribe re-wor)
+int re_gfx_confirm_wait = 0 // 1 = se esta probando una resolucion (re-wor muestra el aviso con la cuenta atras)
+int re_gfx_confirm = 0 // 1 = mantener la resolucion probada, 2 = volver a la anterior (lo lee re-wor)
+int re_gfx_redraw = 0  // 1 = re-wor cambio valores (p. ej. al elegir un preset): repintar las filas
+int re_gfx_popup_shown = 0 // 1 = ya se aviso del reinicio en esta visita a la pantalla
+int re_lang = 0        // idioma elegido: 0 English, 1 Espanol, 2 Francais, 3 Deutsch, 4 Italiano (re-wor lo guarda)
+int re_lang_boot = 0   // idioma con el que arranco el juego (lo escribe re-wor)
+int re_lang_popup_shown = 0
 
 // ---------------------------------------------------------------- menu de opciones: nueva entrada
 script ui_create_options
     Change re_gfx_active = 0
+    Change re_lang_popup_shown = 0
     re_orig_ui_create_options <...>
     if ScreenElementExists id = options_menu_id
         FormatText textname = text "Graphics"
@@ -49,7 +60,94 @@ script ui_create_options
             screen_id = options_menu_id
             helper_text = qs(0x03ac90f0)
         }
+        // Language: los textos traducidos que trae el juego (pak/qs_*). Se aplica al reiniciar.
+        re_lang_text
+        mainmenu_setup_option {
+            choose_script = re_lang_change
+            choose_params = { dir = 1 }
+            back_script = ui_options_pad_back_script
+            menu_item_text = <text>
+            screen_id = options_menu_id
+            helper_text = qs(0x03ac90f0)
+        }
+        AssignAlias id = <mainmenu_item_id> alias = re_lang_item
+        <mainmenu_item_id> :SE_SetProps event_handlers = [
+            { pad_left re_lang_change params = { dir = -1 } }
+            { pad_right re_lang_change params = { dir = 1 } }
+        ]
         main_menu_finalize
+    endif
+endscript
+
+// ---------------------------------------------------------------- idioma
+script re_lang_text
+    names = [ "English" "Español" "Français" "Deutsch" "Italiano" ]
+    FormatText textname = text "Language:   %b" b = (<names> [ ($re_lang) ])
+    if ($re_lang != $re_lang_boot)
+        FormatText textname = text "%t  *" t = <text>
+    endif
+    return text = <text>
+endscript
+
+script re_lang_change dir = 1
+    v = ($re_lang + <dir>)
+    if (<v> < 0)
+        v = 4
+    endif
+    if (<v> > 4)
+        v = 0
+    endif
+    Change re_lang = <v>
+    UI_SFX menustate = generic uitype = select
+    re_lang_text
+    if ScreenElementExists id = re_lang_item
+        re_lang_item :SE_SetProps menurow_txt_item_text = <text>
+    endif
+    // el aviso, una vez por visita al menu y solo si el idioma elegido no es el actual
+    if ($re_lang != $re_lang_boot)
+        if ($re_lang_popup_shown = 0)
+            Change re_lang_popup_shown = 1
+            re_restart_popup
+        endif
+    endif
+endscript
+
+// ---------------------------------------------------------------- aviso de reinicio
+// Al salir de Graphics con cambios que necesitan reiniciar (o del menu de opciones con otro idioma)
+script re_restart_texts
+    if ($re_lang_boot = 1)
+        FormatText textname = heading "Reinicio necesario"
+        FormatText textname = body "Algunos cambios se aplicaran cuando reinicies el juego."
+    else
+        FormatText textname = heading "Restart required"
+        FormatText textname = body "Some changes will be applied when you restart the game."
+    endif
+    return heading = <heading> body = <body>
+endscript
+
+script re_restart_popup
+    re_restart_texts
+    create_dialog_box {
+        heading_text = <heading>
+        body_text = <body>
+        player_device = ($primary_controller)
+        back_button_script = re_restart_popup_ok
+        options = [
+            { func = re_restart_popup_ok text = qs(0x0e41fe46) }
+        ]
+    }
+    if GotParam menu_id
+        AssignAlias id = <menu_id> alias = re_restart_popup_menu
+        LaunchEvent type = focus target = re_restart_popup_menu
+    endif
+endscript
+
+script re_restart_popup_ok
+    destroy_dialog_box
+    if ScreenElementExists id = re_gfx_menu_id
+        generic_event_back
+    elseif ScreenElementExists id = re_lang_item
+        LaunchEvent type = focus target = current_menu
     endif
 endscript
 
@@ -82,6 +180,7 @@ endscript
 
 // ---------------------------------------------------------------- pantalla
 script re_gfx_create_screen
+    Change re_gfx_popup_shown = 0
     Change rich_presence_context = presence_menus
     FormatText textname = title "Graphics"
     UIStack_CreateBoundScreenElement {
@@ -104,7 +203,7 @@ script re_gfx_create_screen
         re_gfx_row_text opt = <i>
         mainmenu_setup_option {
             choose_script = re_gfx_change
-            choose_params = { opt = <i> dir = 1 }
+            choose_params = { opt = <i> dir = 1 choose = 1 }
             back_script = re_gfx_back
             menu_item_text = <text>
             screen_id = re_gfx_menu_id
@@ -115,7 +214,7 @@ script re_gfx_create_screen
             { pad_right re_gfx_change params = { opt = <i> dir = 1 } }
         ]
         i = (<i> + 1)
-    repeat 18
+    repeat 21
     FormatText textname = text "*  Applies after restarting the game"
     mainmenu_setup_option menu_item_text = <text> screen_id = re_gfx_menu_id helper_text = qs(0x03ac90f0) not_focusable
     main_menu_finalize
@@ -134,6 +233,18 @@ script re_gfx_destroy_screen
 endscript
 
 script re_gfx_back
+    if ($re_gfx_confirm_wait = 1)
+        Change re_gfx_confirm = 2
+        UI_SFX menustate = generic uitype = back
+        return
+    endif
+    if ($re_gfx_pending = 1)
+        if ($re_gfx_popup_shown = 0)
+            Change re_gfx_popup_shown = 1
+            re_restart_popup
+            return
+        endif
+    endif
     UI_SFX menustate = generic uitype = back
     generic_event_back
 endscript
@@ -148,83 +259,92 @@ script re_gfx_info opt = 0
     value = 0
     switch <opt>
         case 0
-            label = "Resolution"
-            values = [ "Desktop" "1280 x 720" "1920 x 1080" "2560 x 1440" "3840 x 2160" ]
+            label = "Quality Preset"
+            values = [ "Low" "Medium" "High" "Ultra" "Custom" ]
             value = ($re_gfx_v0)
-            restart = 1
         case 1
-            label = "Display Mode"
-            values = [ "Windowed" "Borderless" "Fullscreen" ]
+            label = "Graphics API"
+            values = [ "Direct3D 12" "Vulkan" ]
             value = ($re_gfx_v1)
             restart = 1
         case 2
-            label = "Frame Rate"
-            values = [ "60 FPS" "75 FPS" "120 FPS" "144 FPS" "165 FPS" "240 FPS" ]
+            label = "Resolution"
+            values = [ "Desktop" "1280 x 720" "1920 x 1080" "2560 x 1440" "3840 x 2160" ]
             value = ($re_gfx_v2)
-            restart = 1
         case 3
-            label = "VSync"
-            values = [ "Off" "On" ]
+            label = "Display Mode"
+            values = [ "Windowed" "Borderless" "Fullscreen" ]
             value = ($re_gfx_v3)
         case 4
-            label = "Show FPS"
-            values = [ "Off" "On" ]
+            label = "Frame Rate"
+            values = [ "60 FPS" "75 FPS" "120 FPS" "144 FPS" "165 FPS" "240 FPS" ]
             value = ($re_gfx_v4)
         case 5
+            label = "VSync"
+            values = [ "Off" "On" ]
+            value = ($re_gfx_v5)
+        case 6
+            label = "Show FPS"
+            values = [ "Off" "On" "Detailed" ]
+            value = ($re_gfx_v6)
+        case 7
             label = "Render Resolution"
             values = [ "1x  (720p)" "2x  (1440p)" "3x  (2160p)" "4x  (2880p)" ]
-            value = ($re_gfx_v5)
-            restart = 1
-        case 6
-            label = "Anti-Aliasing"
-            values = [ "Off" "MSAA 2x" ]
-            value = ($re_gfx_v6)
-            restart = 1
-        case 7
-            label = "Upscaling"
-            values = [ "Bilinear" "AMD CAS" "AMD FSR 1" ]
             value = ($re_gfx_v7)
             restart = 1
         case 8
-            label = "Sharpness"
-            kind = 1
+            label = "Anti-Aliasing"
+            values = [ "Off" "FXAA" "MSAA 2x" "MSAA 2x + FXAA" ]
             value = ($re_gfx_v8)
             restart = 1
         case 9
-            label = "Bloom"
-            kind = 1
+            label = "Texture Filtering"
+            values = [ "Trilinear" "Anisotropic 2x" "Anisotropic 4x" "Anisotropic 8x" "Anisotropic 16x" ]
             value = ($re_gfx_v9)
+            restart = 1
         case 10
-            label = "Glow"
-            kind = 1
+            label = "Post-Processing"
+            values = [ "Off" "On" ]
             value = ($re_gfx_v10)
         case 11
-            label = "Blur"
+            label = "Bloom"
             kind = 1
             value = ($re_gfx_v11)
         case 12
-            label = "Brightness"
+            label = "Glow"
             kind = 1
-            offset = -5
             value = ($re_gfx_v12)
         case 13
-            label = "Contrast"
+            label = "Blur"
             kind = 1
-            offset = -5
             value = ($re_gfx_v13)
         case 14
-            label = "Saturation"
+            label = "Brightness"
             kind = 1
             offset = -5
             value = ($re_gfx_v14)
         case 15
-            label = "Vignette"
+            label = "Contrast"
             kind = 1
+            offset = -5
             value = ($re_gfx_v15)
         case 16
+            label = "Saturation"
+            kind = 1
+            offset = -5
+            value = ($re_gfx_v16)
+        case 17
+            label = "Vignette"
+            kind = 1
+            value = ($re_gfx_v17)
+        case 18
             label = "Film Grain"
             kind = 1
-            value = ($re_gfx_v16)
+            value = ($re_gfx_v18)
+        case 19
+            label = "Crowd"
+            values = [ "None" "Low" "Medium" "High" ]
+            value = ($re_gfx_v19)
         default
             label = "Reset to Defaults"
             kind = 2
@@ -273,6 +393,12 @@ script re_gfx_set opt = 0 value = 0
             Change re_gfx_v15 = <value>
         case 16
             Change re_gfx_v16 = <value>
+        case 17
+            Change re_gfx_v17 = <value>
+        case 18
+            Change re_gfx_v18 = <value>
+        case 19
+            Change re_gfx_v19 = <value>
     endswitch
 endscript
 
@@ -292,7 +418,15 @@ script re_gfx_row_text opt = 0
 endscript
 
 // izquierda / derecha / aceptar sobre una fila
-script re_gfx_change opt = 0 dir = 1
+script re_gfx_change opt = 0 dir = 1 choose = 0
+    // probando una resolucion: A la mantiene (B vuelve, ver re_gfx_back); el resto de botones no hace nada
+    if ($re_gfx_confirm_wait = 1)
+        if (<choose> = 1)
+            Change re_gfx_confirm = 1
+            UI_SFX menustate = generic uitype = select
+        endif
+        return
+    endif
     re_gfx_info opt = <opt>
     if (<kind> = 2)
         Change re_gfx_reset = 1
@@ -301,6 +435,17 @@ script re_gfx_change opt = 0 dir = 1
         return
     endif
     v = (<value> + <dir>)
+    if (<opt> = 0)
+        // el preset da la vuelta por Low..Ultra; Custom solo se muestra
+        count = 4
+        if (<value> = 4)
+            if (<dir> > 0)
+                v = 0
+            else
+                v = 3
+            endif
+        endif
+    endif
     if (<kind> = 0)
         // las listas dan la vuelta
         if (<v> < 0)
@@ -320,6 +465,25 @@ script re_gfx_change opt = 0 dir = 1
     re_gfx_set opt = <opt> value = <v>
     re_gfx_refresh_row opt = <opt>
     UI_SFX menustate = generic uitype = select
+    if not ScriptIsRunning re_gfx_watch_redraw
+        SpawnScriptNow re_gfx_watch_redraw
+    endif
+endscript
+
+// re-wor aplica un preset (o lo pasa a Custom) unas decimas despues: entonces se repintan todas las filas
+script re_gfx_watch_redraw
+    begin
+        if ($re_gfx_redraw = 1)
+            Change re_gfx_redraw = 0
+            i = 0
+            begin
+                re_gfx_refresh_row opt = <i>
+                i = (<i> + 1)
+            repeat 20
+            return
+        endif
+        Wait 1 gameframe
+    repeat 30
 endscript
 
 script re_gfx_refresh_row opt = 0
@@ -344,5 +508,5 @@ script re_gfx_refresh_after_reset
     begin
         re_gfx_refresh_row opt = <i>
         i = (<i> + 1)
-    repeat 17
+    repeat 20
 endscript

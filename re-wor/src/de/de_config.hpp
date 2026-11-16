@@ -68,7 +68,7 @@ struct PerfConfig {
 
 // Configuracion grafica y traduccion (seccion [graphics]).
 struct GraphicsConfig {
-  std::string backend = "d3d12";            // backend GPU: "d3d12"
+  std::string backend = "d3d12";            // API grafica: "d3d12" o "vulkan" (si Vulkan falla, vuelve a D3D12)
   std::string render_target_path = "rtv";   // "rtv" (Hardware ROP - rapido para Nvidia/AMD/Intel y patatas), "rov"
   int resolution_scale = 1;                 // 1 = 720p (ligero/patatas), 2 = 1440p/4K (high-end)
   int texture_cache_mb = 1024;              // limite de textura (MB) para evitar tirones
@@ -80,9 +80,14 @@ struct GraphicsConfig {
   std::string upscale = "bilinear";         // salida: "bilinear", "cas" (nitidez AMD) o "fsr" (AMD FSR 1)
   float sharpness = 0.0f;                   // 0..1 nitidez extra de CAS/FSR
   bool msaa2x = true;                       // MSAA 2x nativo del Xenos
+  bool fxaa = false;                        // FXAA en la imagen final (al momento)
+  int aniso = 3;                            // filtrado anisotropico: 0 1x, 1 2x, 2 4x, 3 8x, 4 16x
+  bool post_fx = true;                      // post-proceso de imagen (bloom, glow...): apagado ahorra una pasada
+  int preset = 2;                           // calidad: 0 Low, 1 Medium, 2 High, 3 Ultra, 4 Custom
   bool letterbox = true;                    // franjas si la ventana no es 16:9
   bool vsync = false;                       // VSync del monitor (present_vsync; al momento)
   bool show_fps = false;                    // contador de FPS en una esquina (al momento)
+  bool perf_detail = false;                 // el contador muestra tiempos de frame y esperas a la GPU
   // Imagen: post-proceso propio en la pasada sandbox, solo el escenario (la autopista y el HUD no se tocan)
   float bloom = 0.0f;                       // 0..1 resplandor de las luces fuertes
   float glow = 0.0f;                        // 0..1 resplandor suave (umbral bajo)
@@ -92,6 +97,30 @@ struct GraphicsConfig {
   float vignette = 0.0f;                    // 0..1
   float grain = 0.0f;                       // 0..1 grano de pelicula
   float blur = 0.0f;                        // 0..1 desenfoque suave del escenario
+  // Publico (qb/crowd.q): 0 ninguno, 1 bajo (filas 3D de delante), 2 medio (publico 2D del fondo), 3 alto (original)
+  int crowd = 3;
+  // Presets de calidad. No tocan la resolucion ni la pantalla: solo AA, filtrado, post-proceso y cache.
+  void ApplyPreset(int p) {
+    static const struct { bool msaa, fxaa; int aniso; bool post; int cache; } k[4] = {
+        {false, false, 0, false, 512},   // Low
+        {false, true, 2, true, 1024},    // Medium
+        {true, false, 3, true, 1024},    // High
+        {true, true, 4, true, 2048},     // Ultra
+    };
+    if (p < 0 || p > 3) { preset = 4; return; }
+    msaa2x = k[p].msaa; fxaa = k[p].fxaa; aniso = k[p].aniso; post_fx = k[p].post; texture_cache_mb = k[p].cache;
+    preset = p;
+  }
+  int MatchPreset() const {
+    for (int p = 0; p < 4; ++p) {
+      GraphicsConfig t = *this;
+      t.ApplyPreset(p);
+      if (t.msaa2x == msaa2x && t.fxaa == fxaa && t.aniso == aniso && t.post_fx == post_fx &&
+          t.texture_cache_mb == texture_cache_mb)
+        return p;
+    }
+    return 4;
+  }
   bool LookActive() const {
     return bloom > 0.001f || glow > 0.001f || vignette > 0.001f || grain > 0.001f || blur > 0.001f ||
            brightness * brightness > 1e-6f ||
@@ -112,7 +141,15 @@ struct HotkeyConfig {
   std::string debug_menu = "F6";     // menu debug original Neversoft
 };
 
+// Seccion [game]. language: idioma de los textos del juego. WoR trae los textos en ingles (pak/qs), frances
+// (qs_f), aleman (qs_g), italiano (qs_i) y espanol (qs_s); el juego carga el que le dice el sistema (XGetLanguage,
+// cvar user_language del SDK). Requiere reiniciar.
+struct GameConfig {
+  std::string language = "en";   // en, es, fr, de, it
+};
+
 struct Config {
+  GameConfig game;
   InputConfig input;
   PerfConfig perf;
   GraphicsConfig graphics;

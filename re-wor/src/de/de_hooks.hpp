@@ -8,6 +8,9 @@ uint64_t GameFrameCount();
 double GameFps();
 // Frames LOGICOS por segundo (bucle principal del juego).
 double LogicFps();
+// Tiempo de juego por segundo real segun el dt del motor (1 = velocidad normal) y dt medio
+double EngineTimeRate();
+double EngineDtAvg();
 // Mezclas de audio por segundo (ideal 187.5) y coste medio en ms.
 double AudioMixRate();
 double AudioMixMs();
