@@ -99,6 +99,9 @@ void flush_trace() {
 }
 
 #ifdef _WIN32
+static std::string (*g_crash_note)() = nullptr;
+void set_crash_note(std::string (*note)()) { g_crash_note = note; }
+
 static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* ep) {
   flush_trace();  // que el trace llegue a disco antes de morir
   std::ofstream log("re_wor_crash_detail.log", std::ios::out | std::ios::trunc);
@@ -144,6 +147,7 @@ static LONG WINAPI VectoredCrashHandler(EXCEPTION_POINTERS* ep) {
     }
     TRACE("[VEH] Access Violation at RIP=0x" << std::hex << ep->ContextRecord->Rip
           << " (" << name << " + 0x" << displacement << ") target=0x" << target);
+    if (g_crash_note) TRACE("[VEH] " << g_crash_note());
   }
   return EXCEPTION_CONTINUE_SEARCH;
 }

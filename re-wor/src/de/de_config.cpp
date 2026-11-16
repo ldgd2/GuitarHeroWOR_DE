@@ -39,6 +39,41 @@ constexpr ActionInfo kActions[] = {
 };
 static_assert(sizeof(kActions) / sizeof(kActions[0]) == static_cast<int>(GuitarAction::kCount));
 
+constexpr ActionInfo kPadActions[] = {
+    {"a", "A (aceptar)", "Return"},
+    {"b", "B (atras)", "Escape,Backspace"},
+    {"x", "X", "X"},
+    {"y", "Y", "Y"},
+    {"start", "Start", "Space"},
+    {"back", "Back", "Tab"},
+    {"up", "Arriba", "Up"},
+    {"down", "Abajo", "Down"},
+    {"left", "Izquierda", "Left"},
+    {"right", "Derecha", "Right"},
+    {"lb", "LB", "Q"},
+    {"rb", "RB", "E"},
+};
+static_assert(sizeof(kPadActions) / sizeof(kPadActions[0]) == static_cast<int>(PadAction::kCount));
+
+// Bateria: pads en la fila de casa, pedal en la barra espaciadora (como GHWT:DE).
+constexpr ActionInfo kDrumActions[] = {
+    {"red", "Pad rojo", "S"},
+    {"yellow", "Platillo amarillo", "D"},
+    {"blue", "Pad azul", "J"},
+    {"orange", "Platillo naranja", "K"},
+    {"green", "Pad verde", "L"},
+    {"kick", "Pedal (bombo)", "Space"},
+    {"start", "Start / Pausa", "Return"},
+    {"star_power", "Star Power", "Backspace"},
+    {"up", "Menu arriba", "Up"},
+    {"down", "Menu abajo", "Down"},
+    {"left", "Menu izquierda", "Left"},
+    {"right", "Menu derecha", "Right"},
+};
+static_assert(sizeof(kDrumActions) / sizeof(kDrumActions[0]) == static_cast<int>(DrumAction::kCount));
+
+constexpr const char* kInstrumentIds[] = {"guitar", "bass", "drums", "vocals"};
+
 Config g_config;
 std::mutex g_mutex;
 bool g_defaults_applied = false;
@@ -49,7 +84,39 @@ void ResetKeysToDefaults(InputConfig& input) {
   for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) {
     input.keys[i] = kActions[i].default_keys;
   }
+  for (int i = 0; i < static_cast<int>(PadAction::kCount); i++) {
+    input.pad_keys[i] = kPadActions[i].default_keys;
+  }
 }
+
+void ResetPlayerKeys(PlayerSlotConfig& p, Instrument which) {
+  if (which == Instrument::kGuitar || which == Instrument::kBass) {
+    for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) p.guitar_keys[i] = kActions[i].default_keys;
+  } else if (which == Instrument::kDrums) {
+    for (int i = 0; i < static_cast<int>(DrumAction::kCount); i++) p.drum_keys[i] = kDrumActions[i].default_keys;
+  } else {
+    for (int i = 0; i < static_cast<int>(PadAction::kCount); i++) p.pad_keys[i] = kPadActions[i].default_keys;
+  }
+}
+
+const char* DefaultGuitarKeys(GuitarAction a) { return kActions[static_cast<int>(a)].default_keys; }
+const char* DefaultDrumKeys(DrumAction a) { return kDrumActions[static_cast<int>(a)].default_keys; }
+const char* DefaultPadKeys(PadAction a) { return kPadActions[static_cast<int>(a)].default_keys; }
+const char* DrumActionId(DrumAction a) { return kDrumActions[static_cast<int>(a)].id; }
+const char* DrumActionLabel(DrumAction a) { return kDrumActions[static_cast<int>(a)].label; }
+const char* InstrumentId(Instrument i) {
+  const int n = static_cast<int>(i);
+  return n >= 0 && n < static_cast<int>(Instrument::kCount) ? kInstrumentIds[n] : "guitar";
+}
+Instrument InstrumentFromId(const std::string& id) {
+  for (int i = 0; i < static_cast<int>(Instrument::kCount); i++) {
+    if (id == kInstrumentIds[i]) return static_cast<Instrument>(i);
+  }
+  return Instrument::kGuitar;
+}
+
+const char* PadActionId(PadAction a) { return kPadActions[static_cast<int>(a)].id; }
+const char* PadActionLabel(PadAction a) { return kPadActions[static_cast<int>(a)].label; }
 
 const char* GuitarActionId(GuitarAction a) {
   return kActions[static_cast<int>(a)].id;
@@ -63,6 +130,9 @@ Config& Get() {
   if (!g_defaults_applied) {
     g_defaults_applied = true;
     ResetKeysToDefaults(g_config.input);
+    for (auto& pl : g_config.input.players) {
+      for (int i = 0; i < static_cast<int>(Instrument::kCount); i++) ResetPlayerKeys(pl, static_cast<Instrument>(i));
+    }
   }
   return g_config;
 }
@@ -98,6 +168,49 @@ void Load() {
           if (auto v = (*keys)[kActions[i].id].value<std::string>()) {
             c.input.keys[i] = *v;
           }
+        }
+      }
+      if (auto keys = (*in)["pad_keys"].as_table()) {
+        for (int i = 0; i < static_cast<int>(PadAction::kCount); i++) {
+          if (auto v = (*keys)[kPadActions[i].id].value<std::string>()) c.input.pad_keys[i] = *v;
+        }
+      }
+      // Cada jugador parte de las teclas globales (las que ya tuviera configuradas); su tabla las sustituye
+      for (auto& pl : c.input.players) {
+        for (int a = 0; a < static_cast<int>(GuitarAction::kCount); a++) pl.guitar_keys[a] = c.input.keys[a];
+        for (int a = 0; a < static_cast<int>(PadAction::kCount); a++) pl.pad_keys[a] = c.input.pad_keys[a];
+      }
+      // Sin [[input.players]] (configuraciones antiguas): el jugador 1 usa cualquier teclado como guitarra
+      c.input.players[0].keyboard = c.input.keyboard_guitar ? "*" : "";
+      if (auto pl = (*in)["players"].as_array()) {
+        for (size_t i = 0; i < pl->size() && i < static_cast<size_t>(kMaxPlayers); i++) {
+          auto* t = (*pl)[i].as_table();
+          if (!t) continue;
+          PlayerSlotConfig& p = c.input.players[i];
+          p.keyboard = (*t)["keyboard"].value_or(p.keyboard);
+          p.keyboard_name = (*t)["keyboard_name"].value_or(p.keyboard_name);
+          p.keyboard_mode = (*t)["keyboard_mode"].value_or(p.keyboard_mode);
+          if (p.keyboard_mode != "pad") p.keyboard_mode = "guitar";
+          p.instrument = (*t)["instrument"].value_or(std::string(p.keyboard_mode == "pad" ? "vocals" : "guitar"));
+          p.instrument = InstrumentId(InstrumentFromId(p.instrument));
+          if (auto k = (*t)["guitar_keys"].as_table()) {
+            for (int a = 0; a < static_cast<int>(GuitarAction::kCount); a++)
+              if (auto v = (*k)[kActions[a].id].value<std::string>()) p.guitar_keys[a] = *v;
+          }
+          if (auto k = (*t)["drum_keys"].as_table()) {
+            for (int a = 0; a < static_cast<int>(DrumAction::kCount); a++)
+              if (auto v = (*k)[kDrumActions[a].id].value<std::string>()) p.drum_keys[a] = *v;
+          }
+          if (auto k = (*t)["pad_keys"].as_table()) {
+            for (int a = 0; a < static_cast<int>(PadAction::kCount); a++)
+              if (auto v = (*k)[kPadActions[a].id].value<std::string>()) p.pad_keys[a] = *v;
+          }
+          p.pad = (*t)["pad"].value_or(p.pad);
+          p.pad_name = (*t)["pad_name"].value_or(p.pad_name);
+          p.mic = (*t)["mic"].value_or(p.mic);
+          p.mic_name = (*t)["mic_name"].value_or(p.mic_name);
+          p.mic_gain = static_cast<float>((*t)["mic_gain"].value_or(static_cast<double>(p.mic_gain)));
+          if (!(p.mic_gain > 0.05f && p.mic_gain < 8.0f)) p.mic_gain = 1.0f;
         }
       }
     }
@@ -214,11 +327,30 @@ bool Save() {
   }
   toml::table input{
       {"backend", c.input.backend},
-      {"keyboard_guitar", c.input.keyboard_guitar},
+      {"keyboard_guitar", !c.input.players[0].keyboard.empty()},
       {"keyboard_gamepad", c.input.keyboard_gamepad},
       {"keyboard_guitar_subtype", c.input.keyboard_guitar_subtype},
   };
   input.insert("keys", std::move(keys));
+  toml::table pad_keys;
+  for (int i = 0; i < static_cast<int>(PadAction::kCount); i++) pad_keys.insert(kPadActions[i].id, c.input.pad_keys[i]);
+  input.insert("pad_keys", std::move(pad_keys));
+  toml::array players;
+  for (const PlayerSlotConfig& p : c.input.players) {
+    toml::table gk, dk, pk;
+    for (int a = 0; a < static_cast<int>(GuitarAction::kCount); a++) gk.insert(kActions[a].id, p.guitar_keys[a]);
+    for (int a = 0; a < static_cast<int>(DrumAction::kCount); a++) dk.insert(kDrumActions[a].id, p.drum_keys[a]);
+    for (int a = 0; a < static_cast<int>(PadAction::kCount); a++) pk.insert(kPadActions[a].id, p.pad_keys[a]);
+    toml::table t{{"keyboard", p.keyboard},     {"keyboard_name", p.keyboard_name},
+                  {"instrument", p.instrument}, {"pad", p.pad},
+                  {"pad_name", p.pad_name},     {"mic", p.mic},
+                  {"mic_name", p.mic_name},     {"mic_gain", static_cast<double>(p.mic_gain)}};
+    t.insert("guitar_keys", std::move(gk));
+    t.insert("drum_keys", std::move(dk));
+    t.insert("pad_keys", std::move(pk));
+    players.push_back(std::move(t));
+  }
+  input.insert("players", std::move(players));
 
   toml::array mods;
   for (auto& m : c.mods) {

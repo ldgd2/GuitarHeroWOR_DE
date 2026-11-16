@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "input/devices.hpp"
+
 #include "de/mod_manager.hpp"
 
 namespace rex {
@@ -29,6 +31,7 @@ class DePanelDialog final : public rex::ui::ImGuiDialog {
  private:
   void DrawControlsTab();
   void DrawDevicesSection();
+  void DrawPlayersSection();
   void DrawModsTab();
   void DrawContentTab(const char* type_filter_a, const char* type_filter_b, const char* help);
   void DrawDevTab();
@@ -44,6 +47,12 @@ class DePanelDialog final : public rex::ui::ImGuiDialog {
   int capturing_action_ = -1;
   bool capture_append_ = false;
   bool controls_dirty_ = false;
+  // Jugadores: perifericos del PC (se refrescan cada pocos segundos)
+  std::vector<re_wor::input::KeyboardInfo> keyboards_;
+  std::vector<re_wor::input::MicInfo> mics_;
+  std::vector<re_wor::input::PadInfo> pads_;
+  double devices_listed_at_ = -100.0;
+  int detecting_player_ = -1;
 
   // Mods
   std::vector<ModInfo> mods_;

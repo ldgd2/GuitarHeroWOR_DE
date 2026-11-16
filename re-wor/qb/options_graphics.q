@@ -52,6 +52,15 @@ script ui_create_options
     Change re_lang_popup_shown = 0
     re_orig_ui_create_options <...>
     if ScreenElementExists id = options_menu_id
+        // Controls: teclados, mandos y microfonos por jugador (qb/controls.q)
+        FormatText textname = text "Controls"
+        mainmenu_setup_option {
+            choose_script = re_ctl_open
+            back_script = ui_options_pad_back_script
+            menu_item_text = <text>
+            screen_id = options_menu_id
+            helper_text = qs(0x03ac90f0)
+        }
         FormatText textname = text "Graphics"
         mainmenu_setup_option {
             choose_script = re_gfx_open
@@ -159,6 +168,8 @@ endscript
 script ui_create_options_facebook
     if ($re_gfx_active = 1)
         re_gfx_create_screen
+    elseif ($re_gfx_active = 2)
+        re_ctl_create_screen
     else
         re_orig_ui_create_options_facebook <...>
     endif
@@ -167,6 +178,9 @@ endscript
 script ui_destroy_options_facebook
     if ScreenElementExists id = re_gfx_menu_id
         re_gfx_destroy_screen
+    elseif ($re_gfx_active = 2)
+        // el juego puede haber quitado ya el menu (va atado a la pila de la interfaz); el panel no
+        re_ctl_destroy_screen
     else
         re_orig_ui_destroy_options_facebook <...>
     endif

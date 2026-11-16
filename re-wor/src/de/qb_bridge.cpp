@@ -314,6 +314,7 @@ struct Guest {
 struct Order {
   std::string line;
   std::function<void(bool, const std::string&)> done;
+  bool quiet = false;   // sin registro si sale bien (ordenes frecuentes de re-wor, p. ej. la pantalla Controles)
 };
 std::mutex g_queue_mutex;
 std::vector<Order> g_queue;
@@ -768,6 +769,11 @@ void Submit(const std::string& line, std::function<void(bool, const std::string&
 
 void ExecuteScript(const std::string& name_and_params) { Submit("run " + name_and_params); }
 
+void ExecuteScriptQuiet(const std::string& name_and_params) {
+  std::lock_guard lock(g_queue_mutex);
+  if (g_queue.size() < 256) g_queue.push_back({"run " + name_and_params, {}, true});
+}
+
 void OpenDebugMenu() { Submit("debugmenu"); }
 
 void UnlockEverything() {
@@ -807,7 +813,7 @@ void OnLogicFrame(PPCContext& ctx, uint8_t* base) {
   for (auto& o : todo) {
     std::string reply;
     const bool ok = Dispatch(ctx, base, o.line, reply);
-    AddLog(o.line + " -> " + reply, ok);
+    if (!ok || !o.quiet) AddLog(o.line + " -> " + reply, ok);
     if (o.done) o.done(ok, reply);
   }
 }

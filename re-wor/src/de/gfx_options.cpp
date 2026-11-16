@@ -13,6 +13,7 @@
 #include <rex/ui/imgui_dialog.h>
 
 #include "core/crash_handler.hpp"
+#include "de/controls_menu.hpp"
 #include "de/de_hooks.hpp"
 #include "de/edfx.hpp"
 #include "de/frame_pacing.hpp"
@@ -292,7 +293,9 @@ void SyncGameMenu(uint8_t* base) {
   static bool ready = false;
   static int last[kOptions];
   static int tick = 0;
-  if (!base || !qb_bridge::ScriptsLoaded() || (++tick % 6)) return;   // 10 veces por segundo basta
+  if (!base || !qb_bridge::ScriptsLoaded()) return;
+  controls::Tick(base);   // Options > Controls (qb/controls.q): cada frame, para que el menu responda al momento
+  if (++tick % 6) return;   // el resto, 10 veces por segundo basta
 
   GraphicsConfig cur;
   {

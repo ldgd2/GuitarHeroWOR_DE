@@ -32,6 +32,50 @@ enum class GuitarAction : int {
 const char* GuitarActionId(GuitarAction a);     // clave en el TOML
 const char* GuitarActionLabel(GuitarAction a);  // texto para la UI
 
+// Acciones del teclado en modo mando (un jugador que solo navega menus o canta: A, B, cruceta...).
+enum class PadAction : int {
+  kA = 0, kB, kX, kY, kStart, kBack, kUp, kDown, kLeft, kRight, kLB, kRB,
+  kCount
+};
+const char* PadActionId(PadAction a);
+const char* PadActionLabel(PadAction a);
+
+// Bateria de teclado (el juego la ve como una bateria de Guitar Hero: pads, pedal y cruceta para menus).
+enum class DrumAction : int {
+  kRed = 0, kYellow, kBlue, kOrange, kGreen, kKick, kStart, kStarPower, kUp, kDown, kLeft, kRight,
+  kCount
+};
+const char* DrumActionId(DrumAction a);
+const char* DrumActionLabel(DrumAction a);
+
+// Instrumento de un jugador: que ve el juego en su mando (guitarra, bajo, bateria o mando + microfono).
+enum class Instrument : int { kGuitar = 0, kBass, kDrums, kVocals, kCount };
+const char* InstrumentId(Instrument i);              // "guitar", "bass", "drums", "vocals"
+Instrument InstrumentFromId(const std::string& id);
+
+// Un jugador (1..4 = mando 0..3 del juego). [[input.players]] en re_wor_de.toml.
+struct PlayerSlotConfig {
+  // Teclado fisico: "" ninguno, "*" cualquiera que no use otro jugador, o la ruta del dispositivo
+  // de Windows, que no cambia entre arranques. keyboard_name solo es para mostrarlo.
+  std::string keyboard;
+  std::string keyboard_name;
+  std::string keyboard_mode = "guitar";   // obsoleto (se deduce del instrumento); se lee de configs antiguas
+  std::string instrument = "guitar";      // "guitar", "bass", "drums" o "vocals"
+  // Teclas propias del jugador (cada teclado las suyas: dos teclados iguales no se pisan). Lista por accion
+  // separada por comas, como [input.keys]. Guitarra y bajo usan guitar_keys; bateria drum_keys; voz pad_keys.
+  std::string guitar_keys[static_cast<int>(GuitarAction::kCount)];
+  std::string drum_keys[static_cast<int>(DrumAction::kCount)];
+  std::string pad_keys[static_cast<int>(PadAction::kCount)];
+  // Mando concreto: "" automatico (por orden de conexion), o el GUID/nombre del mando
+  std::string pad;
+  std::string pad_name;
+  // Microfono: "" ninguno, "default" el predeterminado de Windows, o el id del dispositivo (WASAPI)
+  std::string mic;
+  std::string mic_name;
+  float mic_gain = 1.0f;
+};
+constexpr int kMaxPlayers = 4;
+
 struct InputConfig {
   // "sdl"    -> SDL3: XInput + DirectInput + HID (Santroller, guitarras PS3/Wii, etc.)
   // "xinput" -> solo XInput nativo de Windows
@@ -43,6 +87,9 @@ struct InputConfig {
   int keyboard_guitar_subtype = 6;
   // Teclas por accion: lista separada por comas (ej. "A,1").
   std::string keys[static_cast<int>(GuitarAction::kCount)];
+  // Teclas del modo mando (teclado de un jugador en modo "pad")
+  std::string pad_keys[static_cast<int>(PadAction::kCount)];
+  PlayerSlotConfig players[kMaxPlayers];
 };
 
 struct ModEntryConfig {
@@ -161,6 +208,11 @@ struct Config {
 // Acceso global (thread-safe para lectura/escritura con el mutex).
 Config& Get();
 void ResetKeysToDefaults(InputConfig& input);
+// Teclas de fabrica de un jugador para su instrumento (solo la tabla de ese instrumento).
+void ResetPlayerKeys(PlayerSlotConfig& p, Instrument which);
+const char* DefaultGuitarKeys(GuitarAction a);
+const char* DefaultDrumKeys(DrumAction a);
+const char* DefaultPadKeys(PadAction a);
 std::mutex& Mutex();
 
 // Tecla configurada si el SDK la reconoce; si no (vacia o mal escrita), la de por defecto.

@@ -54,11 +54,15 @@ set(REWOR_SOURCES
     src/input/key_names.cpp
     src/input/keyboard_guitar_driver.cpp
     src/input/input_factory.cpp
+    src/input/devices.cpp
+    src/input/mic_capture.cpp
+    src/input/voice.cpp
     src/de/de_config.cpp
     src/de/de_hooks.cpp
     src/de/de_panel.cpp
     src/de/qb_bridge.cpp
     src/de/gfx_options.cpp
+    src/de/controls_menu.cpp
     src/de/frame_pacing.cpp
     src/de/engine_fixes.cpp
     src/de/language.cpp

@@ -14,7 +14,7 @@ target_refresh_rate = 144
 uncapped_fps = false
 
 [game]
-language = 'en'
+language = 'es'
 
 [graphics]
 aniso = 0
@@ -76,6 +76,232 @@ keyboard_guitar_subtype = 6
     tilt = 'Backspace'
     whammy = 'Numpad0'
     yellow = 'F3'
+
+    [input.pad_keys]
+    a = 'Return'
+    b = 'Escape,Backspace'
+    back = 'Tab'
+    down = 'Down'
+    lb = 'Q'
+    left = 'Left'
+    rb = 'E'
+    right = 'Right'
+    start = 'Space'
+    up = 'Up'
+    x = 'X'
+    y = 'Y'
+
+    [[input.players]]
+    instrument = 'guitar'
+    keyboard = '\\?\HID#VID_2A7A&PID_9597&MI_00#7&1373f174&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}'
+    keyboard_name = 'CASUE USB KB'
+    mic = ''
+    mic_gain = 1.0
+    mic_name = ''
+    pad = ''
+    pad_name = ''
+
+        [input.players.drum_keys]
+        blue = 'J'
+        down = 'Down'
+        green = 'L'
+        kick = 'Space'
+        left = 'Left'
+        orange = 'K'
+        red = 'S'
+        right = 'Right'
+        star_power = 'Backspace'
+        start = 'Return'
+        up = 'Up'
+        yellow = 'D'
+
+        [input.players.guitar_keys]
+        blue = 'F4'
+        green = 'F1'
+        nav_left = 'Left'
+        nav_right = 'Right'
+        orange = 'F5'
+        red = 'F2'
+        star_power = 'Numpad8'
+        start = 'Return'
+        strum_down = 'Numpad2'
+        strum_up = 'Numpad1'
+        tilt = 'Backspace'
+        whammy = 'Numpad0'
+        yellow = 'F3'
+
+        [input.players.pad_keys]
+        a = 'Return'
+        b = 'Escape,Backspace'
+        back = 'Tab'
+        down = 'Down'
+        lb = 'Q'
+        left = 'Left'
+        rb = 'E'
+        right = 'Right'
+        start = 'Space'
+        up = 'Up'
+        x = 'X'
+        y = 'Y'
+
+    [[input.players]]
+    instrument = 'vocals'
+    keyboard = ''
+    keyboard_name = ''
+    mic = '{0.0.1.00000000}.{eb22126f-017e-4948-8576-230c31d210ea}'
+    mic_gain = 1.0
+    mic_name = 'Varios micrófonos (Intel® Smart Sound Technology for Digital Microphones)'
+    pad = ''
+    pad_name = ''
+
+        [input.players.drum_keys]
+        blue = 'J'
+        down = 'Down'
+        green = 'L'
+        kick = 'Space'
+        left = 'Left'
+        orange = 'K'
+        red = 'S'
+        right = 'Right'
+        star_power = 'Backspace'
+        start = 'Return'
+        up = 'Up'
+        yellow = 'D'
+
+        [input.players.guitar_keys]
+        blue = 'F4'
+        green = 'F1'
+        nav_left = 'Left'
+        nav_right = 'Right'
+        orange = 'F5'
+        red = 'F2'
+        star_power = 'Numpad8'
+        start = 'Return'
+        strum_down = 'Down'
+        strum_up = 'Up'
+        tilt = 'Backspace'
+        whammy = 'Numpad0'
+        yellow = 'F3'
+
+        [input.players.pad_keys]
+        a = 'Return'
+        b = 'Escape,Backspace'
+        back = 'Tab'
+        down = 'Down'
+        lb = 'Q'
+        left = 'Left'
+        rb = 'E'
+        right = 'Right'
+        start = 'Space'
+        up = 'Up'
+        x = 'X'
+        y = 'Y'
+
+    [[input.players]]
+    instrument = 'guitar'
+    keyboard = '\\?\ACPI#MSNB1001#4&2d12d0f4&0#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}'
+    keyboard_name = 'Teclado integrado'
+    mic = '{0.0.1.00000000}.{3c9fac2c-5d30-4163-8c0c-3ec9ef70eb88}'
+    mic_gain = 1.0
+    mic_name = 'Micrófono (2- Trust GXT 242 Microphone)'
+    pad = ''
+    pad_name = ''
+
+        [input.players.drum_keys]
+        blue = 'J'
+        down = 'Down'
+        green = 'L'
+        kick = 'Space'
+        left = 'Left'
+        orange = 'K'
+        red = 'S'
+        right = 'Right'
+        star_power = 'Backspace'
+        start = 'Return'
+        up = 'Up'
+        yellow = 'D'
+
+        [input.players.guitar_keys]
+        blue = 'F4'
+        green = 'F1'
+        nav_left = 'Left'
+        nav_right = 'Right'
+        orange = 'F5'
+        red = 'F2'
+        star_power = 'Numpad8'
+        start = 'Return'
+        strum_down = 'Numpad2'
+        strum_up = 'Numpad1'
+        tilt = 'Backspace'
+        whammy = 'Numpad0'
+        yellow = 'F3'
+
+        [input.players.pad_keys]
+        a = 'Return'
+        b = 'Escape,Backspace'
+        back = 'Tab'
+        down = 'Down'
+        lb = 'Q'
+        left = 'Left'
+        rb = 'E'
+        right = 'Right'
+        start = 'Space'
+        up = 'Up'
+        x = 'X'
+        y = 'Y'
+
+    [[input.players]]
+    instrument = 'guitar'
+    keyboard = ''
+    keyboard_name = ''
+    mic = ''
+    mic_gain = 1.0
+    mic_name = ''
+    pad = ''
+    pad_name = ''
+
+        [input.players.drum_keys]
+        blue = 'J'
+        down = 'Down'
+        green = 'L'
+        kick = 'Space'
+        left = 'Left'
+        orange = 'K'
+        red = 'S'
+        right = 'Right'
+        star_power = 'Backspace'
+        start = 'Return'
+        up = 'Up'
+        yellow = 'D'
+
+        [input.players.guitar_keys]
+        blue = 'F4'
+        green = 'F1'
+        nav_left = 'Left'
+        nav_right = 'Right'
+        orange = 'F5'
+        red = 'F2'
+        star_power = 'Numpad8'
+        start = 'Return'
+        strum_down = 'Numpad2'
+        strum_up = 'Numpad1'
+        tilt = 'Backspace'
+        whammy = 'Numpad0'
+        yellow = 'F3'
+
+        [input.players.pad_keys]
+        a = 'Return'
+        b = 'Escape,Backspace'
+        back = 'Tab'
+        down = 'Down'
+        lb = 'Q'
+        left = 'Left'
+        rb = 'E'
+        right = 'Right'
+        start = 'Space'
+        up = 'Up'
+        x = 'X'
+        y = 'Y'
 
 [performance]
 above_normal_priority = true

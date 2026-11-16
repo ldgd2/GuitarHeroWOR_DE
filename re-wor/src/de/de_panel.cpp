@@ -1,4 +1,5 @@
 #include "de/de_panel.hpp"
+#include "de/controls_menu.hpp"
 
 #include <rex/input/input.h>
 #include <rex/input/input_system.h>
@@ -21,7 +22,9 @@
 #include "de/render_sandbox.hpp"
 #include "de/qb_bridge.hpp"
 #include "input/key_names.hpp"
+#include "input/devices.hpp"
 #include "input/keyboard_guitar_driver.hpp"
+#include "input/mic_capture.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -31,6 +34,7 @@
 namespace re_wor::de {
 
 namespace {
+void Hint(const char* text);   // mas abajo
 
 constexpr int kActionCount = static_cast<int>(GuitarAction::kCount);
 
@@ -238,7 +242,7 @@ void DePanelDialog::DrawControlsTab() {
     if (uint16_t vk = kb->PollCapturedKey()) {
       std::lock_guard lock(Mutex());
       std::string name = re_wor::input::VkToKeyName(vk);
-      std::string& keys = cfg.input.keys[capturing_action_];
+      std::string& keys = cfg.input.players[0].guitar_keys[capturing_action_];
       if (vk == 0x1B && !capture_append_) {
         // Escape sin "anadir" = cancelar
       } else if (capture_append_ && !keys.empty()) {
@@ -254,7 +258,11 @@ void DePanelDialog::DrawControlsTab() {
 
   {
     std::lock_guard lock(Mutex());
-    if (ImGui::Checkbox("Usar el teclado como guitarra", &cfg.input.keyboard_guitar)) {
+    cfg.input.keyboard_guitar = !cfg.input.players[0].keyboard.empty();
+    if (ImGui::Checkbox("Usar el teclado como guitarra (jugador 1)", &cfg.input.keyboard_guitar)) {
+      // jugador 1: cualquier teclado libre, o ninguno (la pantalla Controles elige uno concreto)
+      if (!cfg.input.keyboard_guitar) cfg.input.players[0].keyboard.clear();
+      else if (cfg.input.players[0].keyboard.empty()) cfg.input.players[0].keyboard = "*";
       controls_dirty_ = true;
     }
     ImGui::SameLine();
@@ -325,7 +333,7 @@ void DePanelDialog::DrawControlsTab() {
         ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "Pulsa una tecla...");
       } else {
         std::lock_guard lock(Mutex());
-        ImGui::TextUnformatted(cfg.input.keys[i].empty() ? "(sin asignar)" : cfg.input.keys[i].c_str());
+        ImGui::TextUnformatted(cfg.input.players[0].guitar_keys[i].empty() ? "(sin asignar)" : cfg.input.players[0].guitar_keys[i].c_str());
       }
       ImGui::TableNextColumn();
       if (capturing_action_ == i) {
@@ -348,7 +356,7 @@ void DePanelDialog::DrawControlsTab() {
         ImGui::SameLine();
         if (ImGui::SmallButton("Borrar")) {
           std::lock_guard lock(Mutex());
-          cfg.input.keys[i].clear();
+          cfg.input.players[0].guitar_keys[i].clear();
           controls_dirty_ = true;
         }
       }
@@ -367,13 +375,156 @@ void DePanelDialog::DrawControlsTab() {
   if (ImGui::Button("Restaurar teclas por defecto")) {
     std::lock_guard lock(Mutex());
     ResetKeysToDefaults(cfg.input);
+    ResetPlayerKeys(cfg.input.players[0], Instrument::kGuitar);
     controls_dirty_ = true;
   }
   ImGui::SameLine();
   if (ImGui::Button("Abrir re_wor_de.toml")) OpenInExplorer(ConfigPath());
 
   ImGui::Separator();
+  DrawPlayersSection();
   DrawDevicesSection();
+}
+
+// Jugadores: que teclado, mando y microfono usa cada uno (los mismos datos que Options > Controls del juego)
+void DePanelDialog::DrawPlayersSection() {
+  using namespace re_wor::input;
+  auto* kb = KeyboardGuitarDriver::Instance();
+  auto& cfg = Get();
+  if (ImGui::Button("Abrir Opciones > Controls en el juego (desde un menu)")) {
+    controls::RequestOpen();
+  }
+  const double now = ImGui::GetTime();
+  if (now - devices_listed_at_ > 3.0) {
+    keyboards_ = ListKeyboards();
+    mics_ = ListMics();
+    pads_ = ListPads();
+    devices_listed_at_ = now;
+  }
+  bool changed = false;
+  if (detecting_player_ >= 0 && kb) {
+    const std::string path = kb->PollDetectedKeyboard();
+    if (!path.empty()) {
+      std::lock_guard lock(Mutex());
+      auto& p = cfg.input.players[detecting_player_];
+      p.keyboard = path;
+      p.keyboard_name = KeyboardNameForPath(path);
+      detecting_player_ = -1;
+      changed = true;
+    }
+  }
+  ImGui::Separator();
+  ImGui::Text("Jugadores: teclado, mando y microfono de cada uno");
+  if (ImGui::BeginTable("##players", 5, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchSame)) {
+    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 110.f);
+    for (int i = 0; i < kMaxPlayers; i++) ImGui::TableSetupColumn(("Jugador " + std::to_string(i + 1)).c_str());
+    ImGui::TableHeadersRow();
+    std::lock_guard lock(Mutex());
+    auto label = [](const char* t) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextDisabled("%s", t);
+    };
+    // teclado
+    label("Teclado");
+    for (int i = 0; i < kMaxPlayers; i++) {
+      ImGui::TableSetColumnIndex(i + 1);
+      auto& p = cfg.input.players[i];
+      ImGui::PushID(i);
+      const std::string cur = p.keyboard.empty() ? "Ninguno"
+                              : p.keyboard == "*" ? "Cualquiera libre"
+                                                  : (p.keyboard_name.empty() ? KeyboardNameForPath(p.keyboard) : p.keyboard_name);
+      ImGui::SetNextItemWidth(-1);
+      if (ImGui::BeginCombo("##kb", cur.c_str())) {
+        if (ImGui::Selectable("Ninguno", p.keyboard.empty())) { p.keyboard.clear(); changed = true; }
+        if (ImGui::Selectable("Cualquiera libre", p.keyboard == "*")) { p.keyboard = "*"; p.keyboard_name.clear(); changed = true; }
+        for (auto& k : keyboards_) {
+          if (ImGui::Selectable(k.name.c_str(), p.keyboard == k.path)) {
+            p.keyboard = k.path;
+            p.keyboard_name = k.name;
+            changed = true;
+          }
+        }
+        ImGui::EndCombo();
+      }
+      if (detecting_player_ == i) {
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "Pulsa una tecla en ese teclado...");
+        if (ImGui::SmallButton("Cancelar")) { detecting_player_ = -1; if (kb) kb->CancelKeyboardDetect(); }
+      } else if (ImGui::SmallButton("Detectar pulsando una tecla") && kb) {
+        detecting_player_ = i;
+        kb->BeginKeyboardDetect();
+      }
+      ImGui::PopID();
+    }
+    // modo
+    label("Instrumento");
+    for (int i = 0; i < kMaxPlayers; i++) {
+      ImGui::TableSetColumnIndex(i + 1);
+      auto& p = cfg.input.players[i];
+      ImGui::PushID(100 + i);
+      int inst = static_cast<int>(InstrumentFromId(p.instrument));
+      const char* names[] = {"Guitarra", "Bajo", "Bateria", "Voz (mando + microfono)"};
+      ImGui::SetNextItemWidth(-1);
+      if (ImGui::Combo("##inst", &inst, names, 4)) {
+        p.instrument = InstrumentId(static_cast<Instrument>(inst));
+        changed = true;
+      }
+      ImGui::PopID();
+    }
+    // mando
+    label("Mando");
+    for (int i = 0; i < kMaxPlayers; i++) {
+      ImGui::TableSetColumnIndex(i + 1);
+      auto& p = cfg.input.players[i];
+      ImGui::PushID(200 + i);
+      ImGui::SetNextItemWidth(-1);
+      if (ImGui::BeginCombo("##pad", p.pad.empty() ? "Automatico" : p.pad_name.c_str())) {
+        if (ImGui::Selectable("Automatico (orden de conexion)", p.pad.empty())) { p.pad.clear(); p.pad_name.clear(); changed = true; }
+        for (auto& d : pads_) {
+          if (ImGui::Selectable(d.name.c_str(), p.pad == d.guid)) { p.pad = d.guid; p.pad_name = d.name; changed = true; }
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::PopID();
+    }
+    // microfono
+    label("Microfono");
+    for (int i = 0; i < kMaxPlayers; i++) {
+      ImGui::TableSetColumnIndex(i + 1);
+      auto& p = cfg.input.players[i];
+      ImGui::PushID(300 + i);
+      const std::string cur = p.mic.empty() ? "Ninguno" : p.mic == "default" ? "Predeterminado de Windows" : p.mic_name;
+      ImGui::SetNextItemWidth(-1);
+      if (ImGui::BeginCombo("##mic", cur.c_str())) {
+        if (ImGui::Selectable("Ninguno", p.mic.empty())) { p.mic.clear(); p.mic_name.clear(); changed = true; }
+        if (ImGui::Selectable("Predeterminado de Windows", p.mic == "default")) {
+          p.mic = "default";
+          p.mic_name = "Predeterminado de Windows";
+          changed = true;
+        }
+        for (auto& m : mics_) {
+          if (ImGui::Selectable(m.name.c_str(), p.mic == m.id)) { p.mic = m.id; p.mic_name = m.name; changed = true; }
+        }
+        ImGui::EndCombo();
+      }
+      if (!p.mic.empty()) {
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderFloat("##gain", &p.mic_gain, 0.25f, 4.f, "Ganancia %.2fx")) changed = true;
+        ImGui::ProgressBar(MicLevel(i), ImVec2(-1, 8), "");
+        const std::string st = MicStatus(i);
+        if (!st.empty()) ImGui::TextDisabled("%s", st.c_str());
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  Hint("Cada jugador es un mando del juego (Jugador 1 = mando 1). El microfono va con el mando de su jugador: "
+       "quien canta puede usar otro teclado en modo Mando para moverse por los menus.");
+  if (changed) {
+    controls_dirty_ = true;
+    if (kb) kb->ReloadBindings();
+    ApplyMicConfig();
+  }
 }
 
 void DePanelDialog::DrawDevicesSection() {

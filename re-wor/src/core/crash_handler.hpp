@@ -18,6 +18,10 @@ void flush_trace();
 
 void install_crash_handlers();
 
+// Texto extra para el registro de un fallo (p. ej. por donde iba un script propio). Se llama dentro del
+// manejador de excepciones: solo debe leer memoria.
+void set_crash_note(std::string (*note)());
+
 // TRACE(a << b << std::endl): cada hilo arma su linea en un buffer propio (antes todos escribian
 // directo en el archivo sin cerrojo y con flush por linea) y al llegar std::endl la encola.
 class TraceStream {

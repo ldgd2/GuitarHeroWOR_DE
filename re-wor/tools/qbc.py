@@ -63,6 +63,7 @@ TOKEN = re.compile(r'''
   | (?P<float>-?\d+\.\d*|-?\.\d+)
   | (?P<int>-?\d+)
   | (?P<glob>\$[A-Za-z_][A-Za-z0-9_]*)
+  | (?P<path>[A-Za-z]:/[A-Za-z0-9_/\.]+)
   | (?P<name>[A-Za-z_][A-Za-z0-9_/\\.]*[A-Za-z0-9_]|[A-Za-z_])
   | (?P<op>!=|<=|>=|[{}\[\]()=<>+\-*/.,:])
 ''', re.X)
@@ -85,6 +86,44 @@ def lex(src: str):
             line += 1
         elif kind not in ('ws', 'comment'):
             out.append((kind, text, line))
+    return fold_vectors(out)
+
+
+def fold_vectors(toks):
+    """(x,y) y (x,y,z) con numeros -> un solo token par/vector (0x1F / 0x1E). Sin esto la coma sale como 0x09
+    y el analizador de expresiones del juego (sub_823E6600) se queda en un bucle infinito."""
+    out, i = [], 0
+    num = ('int', 'float')
+    while i < len(toks):
+        t = toks[i]
+        if t[0] == 'op' and t[1] == '(':
+            for n in (3, 2):
+                j = i + 1
+                vals = []
+                ok = True
+                for k in range(n):
+                    if j < len(toks) and toks[j][0] in num:
+                        vals.append(float(toks[j][1]))
+                        j += 1
+                    else:
+                        ok = False
+                        break
+                    want = ',' if k < n - 1 else ')'
+                    if j < len(toks) and toks[j][0] == 'op' and toks[j][1] == want:
+                        j += 1
+                    else:
+                        ok = False
+                        break
+                if ok:
+                    out.append(('pair' if n == 2 else 'vec', tuple(vals), t[2]))
+                    i = j
+                    break
+            else:
+                out.append(t)
+                i += 1
+            continue
+        out.append(t)
+        i += 1
     return out
 
 
@@ -131,12 +170,18 @@ def emit_value(out: bytearray, t, line):
         out += b'\x4C' + struct.pack('<I', len(s)) + s
     elif kind == 'qs':
         out += b'\x4E' + struct.pack('<I', int(text[3:-1].strip(), 16))
+    elif kind == 'pair':
+        out += b'' + struct.pack('<ff', *text)
+    elif kind == 'vec':
+        out += b'' + struct.pack('<fff', *text)
     elif kind == 'allargs':
         out += b'\x2C'
     elif kind == 'local':
         out += b'\x2D\x16' + struct.pack('<I', qbkey(text[1:-1]))
     elif kind == 'glob':
         out += b'\x4B\x16' + struct.pack('<I', qbkey(text[1:]))
+    elif kind == 'path':   # ruta de un recurso (c:/gh6_burn/...): su clave, como un nombre
+        out += b'' + struct.pack('<I', qbkey(text))
     elif kind == 'name':
         if text in WORDS:
             out.append(WORDS[text])

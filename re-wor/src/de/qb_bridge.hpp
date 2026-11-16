@@ -46,6 +46,7 @@ void Submit(const std::string& line, std::function<void(bool ok, const std::stri
 
 // Atajos usados por el panel
 void ExecuteScript(const std::string& name_and_params);
+void ExecuteScriptQuiet(const std::string& name_and_params);   // igual, sin registro si sale bien
 void OpenDebugMenu();
 void UnlockEverything();   // scripts de desbloqueo del menu debug: CAMBIA la partida guardada
 

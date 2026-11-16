@@ -509,8 +509,42 @@ extern "C" REX_FUNC(sub_823C6F20) {
 namespace re_wor::de {
 bool BootDone() { return g_boot_done.load(); }
 
+// Vigia: si la logica del juego deja de avanzar 3 s (bucle infinito en un script, bloqueo...), lo apunta en el
+// trace una vez, con re_dbg_mark (los scripts propios pueden dejar ahi una marca de por donde iban).
+namespace {
+std::atomic<uint64_t> g_logic_frames{0};
+void StartLogicWatchdog(uint8_t* base) {
+  static std::atomic<bool> started{false};
+  if (started.exchange(true)) return;
+  static uint8_t* s_base = base;
+  core::set_crash_note([]() -> std::string {
+    int mark = 0;
+    qb_bridge::ReadIntGlobal("re_dbg_mark", s_base, &mark);
+    return "marca re_dbg_mark = " + std::to_string(mark);
+  });
+  std::thread([base] {
+    uint64_t last = 0;
+    int stuck = 0;
+    bool reported = false;
+    for (;;) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      const uint64_t now = g_logic_frames.load();
+      if (now != last) { last = now; stuck = 0; reported = false; continue; }
+      if (++stuck == 6 && !reported) {
+        reported = true;
+        int mark = 0;
+        qb_bridge::ReadIntGlobal("re_dbg_mark", base, &mark);
+        TRACE("[Vigia] la logica del juego lleva 3 s sin avanzar (frame " << now << ", marca re_dbg_mark = " << mark << ")");
+      }
+    }
+  }).detach();
+}
+}  // namespace
+
 // desde el frame logico (hilo del juego): parar los videos pendientes y leer el reloj de la cancion
 void OnLogicFrameExtras(PPCContext& ctx, uint8_t* base) {
+  g_logic_frames.fetch_add(1, std::memory_order_relaxed);
+  if (g_boot_done) StartLogicWatchdog(base);
   if (Get().dev.auto_skip_intro && !g_boot_done && !g_skip_armed && !g_movie_seen) {
     RequestSkipIntro();
   }

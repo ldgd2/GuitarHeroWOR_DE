@@ -111,7 +111,7 @@ PPC_STUB_TRACKED(__imp__XamInputControl);
 PPC_STUB_TRACKED(__imp__XamInputRawState);
 
 // --- XamVoice ---
-PPC_STUB_TRACKED(__imp__XamVoiceSubmitPacket);
+// XamVoiceSubmitPacket y el resto de XamVoice: src/input/voice.cpp (microfono)
 
 // --- NetDll (additional networking) ---
 PPC_STUB_TRACKED(__imp__NetDll_XNetConnect);

@@ -21,6 +21,7 @@
 #include <string>
 
 #include "core/crash_handler.hpp"
+#include "input/devices.hpp"
 #include "input/key_names.hpp"
 
 namespace re_wor::input {
@@ -117,109 +118,6 @@ uint16_t AutoPressButtons() {
   return b;
 }
 
-}  // namespace
-
-KeyboardGuitarDriver::KeyboardGuitarDriver(rex::ui::Window* window, size_t window_z_order)
-    : InputDriver(window, window_z_order) {
-  ReloadBindings();
-  g_instance.store(this);
-}
-
-KeyboardGuitarDriver::~KeyboardGuitarDriver() {
-  KeyboardGuitarDriver* self = this;
-  g_instance.compare_exchange_strong(self, nullptr);
-  Detach();
-}
-
-KeyboardGuitarDriver* KeyboardGuitarDriver::Instance() {
-  return g_instance.load();
-}
-
-void KeyboardGuitarDriver::SetSuppressed(bool suppressed) {
-  g_suppressed.store(suppressed);
-  if (suppressed) {
-    if (auto* self = Instance()) {
-      std::lock_guard lock(self->mutex_);
-      std::memset(self->key_down_, 0, sizeof(self->key_down_));
-      self->RefreshKeystrokesLocked();
-    }
-  }
-}
-
-X_STATUS KeyboardGuitarDriver::Setup() {
-  TRACE("[KeyboardGuitar] Driver de guitarra por teclado listo");
-  return X_STATUS_SUCCESS;
-}
-
-void KeyboardGuitarDriver::ReloadBindings() {
-  std::string keys[static_cast<int>(GuitarAction::kCount)];
-  {
-    std::lock_guard cfg_lock(re_wor::de::Mutex());
-    auto& cfg = re_wor::de::Get();
-    for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) keys[i] = cfg.input.keys[i];
-  }
-  std::lock_guard lock(mutex_);
-  for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) {
-    bindings_[i] = ParseKeyList(keys[i]);
-  }
-}
-
-void KeyboardGuitarDriver::OnWindowAvailable(rex::ui::Window* window) {
-  if (!window) return;
-  {
-    std::lock_guard lock(mutex_);
-    attached_window_ = window;
-  }
-  window->AddInputListener(this, window_z_order());
-  window->AddListener(this);
-}
-
-void KeyboardGuitarDriver::Detach() {
-  rex::ui::Window* window = attached_window_;
-  if (!window) return;
-  window->app_context().CallInUIThreadSynchronous([this, window] {
-    {
-      std::lock_guard lock(mutex_);
-      attached_window_ = nullptr;
-    }
-    window->RemoveInputListener(this);
-    window->RemoveListener(this);
-  });
-}
-
-void KeyboardGuitarDriver::OnClosing(rex::ui::UIEvent&) {
-  Detach();
-}
-
-void KeyboardGuitarDriver::OnLostFocus(rex::ui::UISetupEvent&) {
-  has_focus_ = false;
-  std::lock_guard lock(mutex_);
-  std::memset(key_down_, 0, sizeof(key_down_));
-  RefreshKeystrokesLocked();
-}
-
-void KeyboardGuitarDriver::OnGotFocus(rex::ui::UISetupEvent&) {
-  has_focus_ = true;
-}
-
-void KeyboardGuitarDriver::BeginKeyCapture() {
-  captured_vk_ = 0;
-  capturing_ = true;
-}
-
-void KeyboardGuitarDriver::CancelKeyCapture() {
-  capturing_ = false;
-  captured_vk_ = 0;
-}
-
-uint16_t KeyboardGuitarDriver::PollCapturedKey() {
-  uint16_t vk = captured_vk_.exchange(0);
-  if (vk) capturing_ = false;
-  return vk;
-}
-
-namespace {
-
 // El SDK traduce las teclas por su posicion fisica (scancode de SDL): el pad numerico llega siempre
 // como Numpad0..9 / Decimal, este o no activo Bloq Num. Windows (y el lanzador) en cambio lo ven
 // como Fin, Flecha abajo, etc. cuando Bloq Num esta apagado. Cada tecla del pad cuenta tambien como
@@ -261,33 +159,284 @@ uint16_t ResolveSide(uint16_t vk) {
   }
 }
 
+// Modo mando: boton XInput y VK_PAD de cada accion (orden de PadAction)
+constexpr uint16_t kPadButtons[] = {
+    X_INPUT_GAMEPAD_A,         X_INPUT_GAMEPAD_B,          X_INPUT_GAMEPAD_X,         X_INPUT_GAMEPAD_Y,
+    X_INPUT_GAMEPAD_START,     X_INPUT_GAMEPAD_BACK,       X_INPUT_GAMEPAD_DPAD_UP,   X_INPUT_GAMEPAD_DPAD_DOWN,
+    X_INPUT_GAMEPAD_DPAD_LEFT, X_INPUT_GAMEPAD_DPAD_RIGHT, X_INPUT_GAMEPAD_LEFT_SHOULDER,
+    X_INPUT_GAMEPAD_RIGHT_SHOULDER,
+};
+constexpr uint16_t kPadPadKeys[] = {0x5800, 0x5801, 0x5802, 0x5803, 0x5814, 0x5815,
+                                    0x5810, 0x5811, 0x5812, 0x5813, 0x5805, 0x5804};
+static_assert(sizeof(kPadButtons) / sizeof(kPadButtons[0]) == static_cast<size_t>(re_wor::de::PadAction::kCount));
+static_assert(sizeof(kPadPadKeys) / sizeof(kPadPadKeys[0]) == static_cast<size_t>(re_wor::de::PadAction::kCount));
+
+// Bateria de Guitar Hero (Xbox 360): verde A, rojo B, amarillo Y, azul X, naranja RB, pedal LB (orden de DrumAction)
+constexpr uint16_t kDrumButtons[] = {
+    X_INPUT_GAMEPAD_B,         X_INPUT_GAMEPAD_Y,         X_INPUT_GAMEPAD_X,          X_INPUT_GAMEPAD_RIGHT_SHOULDER,
+    X_INPUT_GAMEPAD_A,         X_INPUT_GAMEPAD_LEFT_SHOULDER, X_INPUT_GAMEPAD_START,  X_INPUT_GAMEPAD_BACK,
+    X_INPUT_GAMEPAD_DPAD_UP,   X_INPUT_GAMEPAD_DPAD_DOWN, X_INPUT_GAMEPAD_DPAD_LEFT,  X_INPUT_GAMEPAD_DPAD_RIGHT,
+};
+constexpr uint16_t kDrumPadKeys[] = {0x5801, 0x5803, 0x5802, 0x5804, 0x5800, 0x5805,
+                                     0x5814, 0x5815, 0x5810, 0x5811, 0x5812, 0x5813};
+static_assert(sizeof(kDrumButtons) / sizeof(kDrumButtons[0]) == static_cast<size_t>(re_wor::de::DrumAction::kCount));
+static_assert(sizeof(kDrumPadKeys) / sizeof(kDrumPadKeys[0]) == static_cast<size_t>(re_wor::de::DrumAction::kCount));
+
+constexpr int kPlayers = re_wor::de::kMaxPlayers;
+
+DeviceId PlayerDevice(int p) { return static_cast<DeviceId>(static_cast<uint64_t>(kKeyboardGuitarDevice) + p); }
+int DevicePlayer(DeviceId id) {
+  const uint64_t d = static_cast<uint64_t>(id) - static_cast<uint64_t>(kKeyboardGuitarDevice);
+  return d < static_cast<uint64_t>(kPlayers) ? static_cast<int>(d) : -1;
+}
+
 }  // namespace
 
-void KeyboardGuitarDriver::ApplyKeyLocked(uint16_t vk, bool down) {
-  key_down_[vk] = down;
-  if (uint16_t nav = NumpadNavAlias(vk)) key_down_[nav] = down;
+KeyboardGuitarDriver::KeyboardGuitarDriver(rex::ui::Window* window, size_t window_z_order)
+    : InputDriver(window, window_z_order) {
+  ReloadBindings();
+  g_instance.store(this);
+}
+
+KeyboardGuitarDriver::~KeyboardGuitarDriver() {
+  KeyboardGuitarDriver* self = this;
+  g_instance.compare_exchange_strong(self, nullptr);
+  Detach();
+}
+
+KeyboardGuitarDriver* KeyboardGuitarDriver::Instance() {
+  return g_instance.load();
+}
+
+void KeyboardGuitarDriver::SetSuppressed(bool suppressed) {
+  g_suppressed.store(suppressed);
+  if (suppressed) {
+    if (auto* self = Instance()) {
+      std::lock_guard lock(self->mutex_);
+      self->keys_by_kb_.clear();
+      self->RefreshKeystrokesLocked();
+    }
+  }
+}
+
+X_STATUS KeyboardGuitarDriver::Setup() {
+  TRACE("[KeyboardGuitar] Driver de teclados (hasta 4 jugadores) listo");
+  return X_STATUS_SUCCESS;
+}
+
+void KeyboardGuitarDriver::ReloadBindings() {
+  using re_wor::de::Instrument;
+  re_wor::de::PlayerSlotConfig players[kPlayers];
+  int guitar_subtype = 6;
+  {
+    std::lock_guard cfg_lock(re_wor::de::Mutex());
+    auto& cfg = re_wor::de::Get();
+    for (int i = 0; i < kPlayers; i++) players[i] = cfg.input.players[i];
+    guitar_subtype = cfg.input.keyboard_guitar_subtype;
+  }
+  std::lock_guard lock(mutex_);
+  for (int i = 0; i < kPlayers; i++) {
+    Player& pl = players_[i];
+    const auto& c = players[i];
+    pl.keyboard = c.keyboard;
+    pl.has_mic = !c.mic.empty();
+    switch (re_wor::de::InstrumentFromId(c.instrument)) {
+      case Instrument::kBass: pl.mode = Mode::kGuitar; pl.subtype = 11; break;   // GUITAR_BASS
+      case Instrument::kDrums: pl.mode = Mode::kDrums; pl.subtype = 8; break;    // DRUM_KIT
+      case Instrument::kVocals: pl.mode = Mode::kPad; pl.subtype = 1; break;     // GAMEPAD (+ microfono)
+      default: pl.mode = Mode::kGuitar; pl.subtype = static_cast<uint8_t>(guitar_subtype); break;
+    }
+    for (int a = 0; a < static_cast<int>(GuitarAction::kCount); a++) pl.guitar[a] = ParseKeyList(c.guitar_keys[a]);
+    for (int a = 0; a < static_cast<int>(re_wor::de::DrumAction::kCount); a++) pl.drums[a] = ParseKeyList(c.drum_keys[a]);
+    for (int a = 0; a < static_cast<int>(re_wor::de::PadAction::kCount); a++) pl.pad[a] = ParseKeyList(c.pad_keys[a]);
+  }
+  if (menu_fallback_ && players_[0].keyboard.empty()) {
+    Player& pl = players_[0];
+    pl.keyboard = "**";   // cualquier teclado, aunque sea de otro jugador
+    pl.mode = Mode::kPad;
+    pl.subtype = 1;       // GAMEPAD
+    for (int a = 0; a < static_cast<int>(re_wor::de::PadAction::kCount); a++)
+      pl.pad[a] = ParseKeyList(re_wor::de::DefaultPadKeys(static_cast<re_wor::de::PadAction>(a)));
+  }
+  RefreshKeystrokesLocked();
+}
+
+void KeyboardGuitarDriver::SetMenuFallback(bool on) {
+  if (menu_fallback_.exchange(on) == on) return;
+  TRACE("[Input] jugador 1 sin control: teclado como mando " << (on ? "activado" : "desactivado"));
+  ReloadBindings();
+}
+
+void KeyboardGuitarDriver::OnWindowAvailable(rex::ui::Window* window) {
+  if (!window) return;
+  {
+    std::lock_guard lock(mutex_);
+    attached_window_ = window;
+  }
+  window->AddInputListener(this, window_z_order());
+  window->AddListener(this);
+}
+
+void KeyboardGuitarDriver::Detach() {
+  rex::ui::Window* window = attached_window_;
+  if (!window) return;
+  window->app_context().CallInUIThreadSynchronous([this, window] {
+    {
+      std::lock_guard lock(mutex_);
+      attached_window_ = nullptr;
+    }
+    window->RemoveInputListener(this);
+    window->RemoveListener(this);
+  });
+}
+
+void KeyboardGuitarDriver::OnClosing(rex::ui::UIEvent&) {
+  Detach();
+}
+
+void KeyboardGuitarDriver::OnLostFocus(rex::ui::UISetupEvent&) {
+  has_focus_ = false;
+  std::lock_guard lock(mutex_);
+  keys_by_kb_.clear();
+  RefreshKeystrokesLocked();
+}
+
+void KeyboardGuitarDriver::OnGotFocus(rex::ui::UISetupEvent&) {
+  has_focus_ = true;
+}
+
+void KeyboardGuitarDriver::BeginKeyCapture() {
+  captured_vk_ = 0;
+  capturing_ = true;
+}
+
+void KeyboardGuitarDriver::CancelKeyCapture() {
+  capturing_ = false;
+  captured_vk_ = 0;
+}
+
+uint16_t KeyboardGuitarDriver::PollCapturedKey(std::string* keyboard_path) {
+  uint16_t vk = captured_vk_.exchange(0);
+  if (vk) {
+    capturing_ = false;
+    if (keyboard_path) {
+      std::lock_guard lock(mutex_);
+      *keyboard_path = captured_path_;
+    }
+  }
+  return vk;
+}
+
+void KeyboardGuitarDriver::BeginKeyboardDetect() {
+  std::lock_guard lock(mutex_);
+  detected_path_.clear();
+  detecting_ = true;
+}
+
+void KeyboardGuitarDriver::CancelKeyboardDetect() {
+  std::lock_guard lock(mutex_);
+  detecting_ = false;
+  detected_path_.clear();
+}
+
+std::string KeyboardGuitarDriver::PollDetectedKeyboard() {
+  std::lock_guard lock(mutex_);
+  std::string p = std::move(detected_path_);
+  detected_path_.clear();
+  return p;
+}
+
+void KeyboardGuitarDriver::ApplyKeyLocked(KeyState& keys, uint16_t vk, bool down) {
+  keys[vk] = down;
+  if (uint16_t nav = NumpadNavAlias(vk)) keys[nav] = down;
   if (vk == 0x10 || vk == 0x11 || vk == 0x12) {
     // Generico + cada lado segun el estado real de Windows (al soltar uno puede seguir el otro).
     const int l = vk == 0x10 ? 0xA0 : vk == 0x11 ? 0xA2 : 0xA4;
-    key_down_[l] = SideDown(l);
-    key_down_[l + 1] = SideDown(l + 1);
-    key_down_[vk] = key_down_[l] || key_down_[l + 1] || down;
-    if (!down && !key_down_[l] && !key_down_[l + 1]) key_down_[vk] = false;
+    keys[l] = SideDown(l);
+    keys[l + 1] = SideDown(l + 1);
+    keys[vk] = keys[l] || keys[l + 1] || down;
+    if (!down && !keys[l] && !keys[l + 1]) keys[vk] = false;
   }
+}
+
+// Un teclado sirve a un jugador si es el suyo, o si el jugador acepta "cualquiera" (el primero con "*") y
+// ningun otro jugador lo tiene asignado.
+bool KeyboardGuitarDriver::PlayerUsesKeyboardLocked(int player, uint32_t kb) {
+  const std::string& rule = players_[player].keyboard;
+  if (rule.empty()) return false;
+  if (rule == "**") return true;
+  auto it = path_by_kb_.find(kb);
+  const std::string path = it != path_by_kb_.end() ? it->second : std::string();
+  if (rule != "*") return !path.empty() && rule == path;
+  for (int i = 0; i < kPlayers; i++) {
+    if (i != player && !path.empty() && players_[i].keyboard == path) return false;
+  }
+  for (int i = 0; i < player; i++) {
+    if (players_[i].keyboard == "*") return false;
+  }
+  return true;
+}
+
+bool KeyboardGuitarDriver::KeyDownLocked(int player, uint16_t vk) {
+  if (vk >= 256) return false;
+  for (auto& [kb, keys] : keys_by_kb_) {
+    if (keys[vk] && PlayerUsesKeyboardLocked(player, kb)) return true;
+  }
+  return false;
+}
+
+uint32_t KeyboardGuitarDriver::PressedMaskLocked(int player) {
+  Player& pl = players_[player];
+  const std::vector<uint16_t>* lists = pl.guitar;
+  int count = static_cast<int>(GuitarAction::kCount);
+  if (pl.mode == Mode::kDrums) {
+    lists = pl.drums;
+    count = static_cast<int>(re_wor::de::DrumAction::kCount);
+  } else if (pl.mode == Mode::kPad) {
+    lists = pl.pad;
+    count = static_cast<int>(re_wor::de::PadAction::kCount);
+  }
+  uint32_t pressed = 0;
+  for (int i = 0; i < count; i++) {
+    for (uint16_t vk : lists[i]) {
+      if (KeyDownLocked(player, vk)) {
+        pressed |= 1u << i;
+        break;
+      }
+    }
+  }
+  return pressed;
 }
 
 void KeyboardGuitarDriver::OnKeyDown(rex::ui::KeyEvent& e) {
   const uint16_t vk = static_cast<uint16_t>(e.virtual_key());
+  const uint32_t kb = e.keyboard_id();
+  if (detecting_) {
+    std::string path = KeyboardPathForId(kb);
+    if (!path.empty()) {
+      std::lock_guard lock(mutex_);
+      detected_path_ = path;
+      detecting_ = false;
+      e.set_handled(true);
+      return;
+    }
+  }
   if (capturing_) {
     if (vk != 0 && vk < 256) {
+      {
+        std::lock_guard lock(mutex_);
+        captured_path_ = KeyboardPathForId(kb);
+      }
       captured_vk_ = ResolveSide(vk);
       e.set_handled(true);
     }
     return;
   }
-  if (g_suppressed || !has_focus_ || vk >= 256) return;
+  if (!has_focus_ || vk >= 256) return;   // suprimido: se sigue leyendo (visor de Controles) pero no llega al juego
+  const std::string path = KeyboardPathForId(kb);
   std::lock_guard lock(mutex_);
-  ApplyKeyLocked(vk, true);
+  path_by_kb_[kb] = path;
+  ApplyKeyLocked(keys_by_kb_[kb], vk, true);
   RefreshKeystrokesLocked();
 }
 
@@ -295,103 +444,124 @@ void KeyboardGuitarDriver::OnKeyUp(rex::ui::KeyEvent& e) {
   const uint16_t vk = static_cast<uint16_t>(e.virtual_key());
   if (vk >= 256) return;
   std::lock_guard lock(mutex_);
-  ApplyKeyLocked(vk, false);
+  auto it = keys_by_kb_.find(e.keyboard_id());
+  if (it != keys_by_kb_.end()) ApplyKeyLocked(it->second, vk, false);
   RefreshKeystrokesLocked();
 }
 
 bool KeyboardGuitarDriver::IsActionDown(GuitarAction a) {
   std::lock_guard lock(mutex_);
-  for (uint16_t vk : bindings_[static_cast<int>(a)]) {
-    if (vk < 256 && key_down_[vk]) return true;
+  for (int p = 0; p < kPlayers; p++) {
+    if (players_[p].keyboard.empty() || players_[p].mode != Mode::kGuitar) continue;
+    for (uint16_t vk : players_[p].guitar[static_cast<int>(a)]) {
+      if (KeyDownLocked(p, vk)) return true;
+    }
+    return false;
   }
   return false;
 }
 
-uint16_t KeyboardGuitarDriver::ComputeButtonsLocked(int16_t* whammy, int16_t* tilt) {
+uint32_t KeyboardGuitarDriver::PlayerPressedMask(int player) {
+  if (player < 0 || player >= kPlayers) return 0;
+  std::lock_guard lock(mutex_);
+  return players_[player].keyboard.empty() ? 0 : PressedMaskLocked(player);
+}
+
+uint16_t KeyboardGuitarDriver::PlayerButtons(int player) {
+  if (player < 0 || player >= kPlayers) return 0;
+  std::lock_guard lock(mutex_);
+  if (players_[player].keyboard.empty()) return 0;
+  int16_t w = 0, t = 0;
+  return ComputeButtonsLocked(player, &w, &t);
+}
+
+uint16_t KeyboardGuitarDriver::ComputeButtonsLocked(int player, int16_t* whammy, int16_t* tilt) {
   uint16_t buttons = 0;
-  bool whammy_down = false;
-  bool tilt_down = false;
-  for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) {
-    bool down = false;
-    for (uint16_t vk : bindings_[i]) {
-      if (vk < 256 && key_down_[vk]) {
-        down = true;
-        break;
-      }
+  const uint32_t pressed = PressedMaskLocked(player);
+  *whammy = int16_t(-32768);
+  *tilt = 0;
+  if (players_[player].mode == Mode::kPad) {
+    for (int i = 0; i < static_cast<int>(re_wor::de::PadAction::kCount); i++) {
+      if (pressed & (1u << i)) buttons |= kPadButtons[i];
     }
-    if (!down) continue;
+    *whammy = 0;
+    return buttons;
+  }
+  if (players_[player].mode == Mode::kDrums) {
+    for (int i = 0; i < static_cast<int>(re_wor::de::DrumAction::kCount); i++) {
+      if (pressed & (1u << i)) buttons |= kDrumButtons[i];
+    }
+    *whammy = 0;
+    return buttons;
+  }
+  for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) {
+    if (!(pressed & (1u << i))) continue;
     if (i == static_cast<int>(GuitarAction::kWhammy)) {
-      whammy_down = true;
+      *whammy = int16_t(32767);   // guitarra X360: palanca = stick derecho X (reposo -32768)
     } else if (i == static_cast<int>(GuitarAction::kTilt)) {
-      tilt_down = true;
+      *tilt = int16_t(32767);     // inclinacion = stick derecho Y (vertical = +32767)
     } else {
       buttons |= kActionButtons[i];
     }
   }
-  // Guitarra X360: palanca = stick derecho X (reposo -32768),
-  // inclinacion = stick derecho Y (vertical = +32767).
-  *whammy = whammy_down ? int16_t(32767) : int16_t(-32768);
-  *tilt = tilt_down ? int16_t(32767) : int16_t(0);
   return buttons;
 }
 
 void KeyboardGuitarDriver::RefreshKeystrokesLocked() {
-  uint32_t pressed = 0;
-  for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) {
-    for (uint16_t vk : bindings_[i]) {
-      if (vk < 256 && key_down_[vk]) {
-        pressed |= 1u << i;
-        break;
-      }
+  for (int p = 0; p < kPlayers; p++) {
+    Player& pl = players_[p];
+    const uint32_t pressed = (pl.keyboard.empty() || g_suppressed) ? 0 : PressedMaskLocked(p);
+    const uint32_t changed = pressed ^ pl.pressed;
+    pl.pressed = pressed;
+    const uint16_t* pad_keys = pl.mode == Mode::kPad ? kPadPadKeys : pl.mode == Mode::kDrums ? kDrumPadKeys : kActionPadKeys;
+    const int count = pl.mode == Mode::kPad     ? static_cast<int>(re_wor::de::PadAction::kCount)
+                      : pl.mode == Mode::kDrums ? static_cast<int>(re_wor::de::DrumAction::kCount)
+                                                : static_cast<int>(GuitarAction::kCount);
+    for (int i = 0; i < count; i++) {
+      if (changed & (1u << i)) PushKeystroke(pl, pad_keys[i], (pressed & (1u << i)) != 0);
     }
-  }
-  const uint32_t changed = pressed ^ pressed_actions_;
-  pressed_actions_ = pressed;
-  for (int i = 0; i < static_cast<int>(GuitarAction::kCount); i++) {
-    if (changed & (1u << i)) PushKeystroke(kActionPadKeys[i], (pressed & (1u << i)) != 0);
   }
 }
 
-void KeyboardGuitarDriver::PushKeystroke(uint16_t vk_pad, bool down) {
+void KeyboardGuitarDriver::PushKeystroke(Player& pl, uint16_t vk_pad, bool down) {
   X_INPUT_KEYSTROKE ks = {};
   ks.virtual_key = vk_pad;
   ks.unicode = 0;
   ks.flags = down ? X_INPUT_KEYSTROKE_KEYDOWN : X_INPUT_KEYSTROKE_KEYUP;
   ks.user_index = 0;
   ks.hid_code = 0;
-  if (keystrokes_.size() >= kMaxQueuedKeystrokes) keystrokes_.pop();
-  keystrokes_.push(ks);
+  if (pl.keystrokes.size() >= kMaxQueuedKeystrokes) pl.keystrokes.pop();
+  pl.keystrokes.push(ks);
 }
-
-bool KeyboardGuitarDriverEnabled();
 
 void KeyboardGuitarDriver::EnumerateDevices(std::vector<DeviceInfo>& out) {
-  if (!KeyboardGuitarDriverEnabled()) return;
-  DeviceInfo info;
-  info.id = kKeyboardGuitarDevice;
-  info.name = "Guitarra de teclado (re-wor DE)";
-  info.guid = "re-wor-keyboard-guitar";
-  {
-    std::lock_guard cfg_lock(re_wor::de::Mutex());
-    info.subtype = static_cast<uint8_t>(re_wor::de::Get().input.keyboard_guitar_subtype);
+  std::lock_guard lock(mutex_);
+  for (int p = 0; p < kPlayers; p++) {
+    if (players_[p].keyboard.empty()) continue;
+    DeviceInfo info;
+    info.id = PlayerDevice(p);
+    const char* what = players_[p].mode == Mode::kPad     ? "Mando de teclado"
+                       : players_[p].mode == Mode::kDrums ? "Bateria de teclado"
+                       : players_[p].subtype == 11        ? "Bajo de teclado"
+                                                          : "Guitarra de teclado";
+    info.name = std::string(what) + " (jugador " + std::to_string(p + 1) + ")";
+    // re-wor-kbd-p<N>: PlayerAssignment (input_factory.cpp) lo manda al mando N del juego
+    info.guid = "re-wor-kbd-p" + std::to_string(p);
+    info.subtype = players_[p].subtype;
+    info.synthetic = true;
+    out.push_back(info);
   }
-  info.synthetic = true;
-  out.push_back(info);
 }
 
-X_RESULT KeyboardGuitarDriver::GetDeviceCapabilities(DeviceId id, uint32_t,
-                                                     X_INPUT_CAPABILITIES* out_caps) {
-  if (id != kKeyboardGuitarDevice || !KeyboardGuitarDriverEnabled()) {
-    return X_ERROR_DEVICE_NOT_CONNECTED;
-  }
+X_RESULT KeyboardGuitarDriver::GetDeviceCapabilities(DeviceId id, uint32_t, X_INPUT_CAPABILITIES* out_caps) {
+  const int p = DevicePlayer(id);
+  std::lock_guard lock(mutex_);
+  if (p < 0 || players_[p].keyboard.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
   if (out_caps) {
     std::memset(out_caps, 0, sizeof(*out_caps));
     out_caps->type = XINPUT_DEVTYPE_GAMEPAD;
-    {
-      std::lock_guard cfg_lock(re_wor::de::Mutex());
-      out_caps->sub_type = static_cast<uint8_t>(re_wor::de::Get().input.keyboard_guitar_subtype);
-    }
-    out_caps->flags = 0;
+    out_caps->sub_type = players_[p].subtype;
+    out_caps->flags = players_[p].has_mic ? 0x0004 : 0;   // XINPUT_CAPS_VOICE_SUPPORTED: tiene "auriculares"
     out_caps->gamepad.buttons = 0xFFFF;
     out_caps->gamepad.left_trigger = 0xFF;
     out_caps->gamepad.right_trigger = 0xFF;
@@ -404,23 +574,24 @@ X_RESULT KeyboardGuitarDriver::GetDeviceCapabilities(DeviceId id, uint32_t,
 }
 
 X_RESULT KeyboardGuitarDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
-  if (id != kKeyboardGuitarDevice || !KeyboardGuitarDriverEnabled()) {
-    return X_ERROR_DEVICE_NOT_CONNECTED;
-  }
-  if (!out_state) return X_ERROR_SUCCESS;
-  std::memset(out_state, 0, sizeof(*out_state));
+  const int p = DevicePlayer(id);
+  if (p < 0) return X_ERROR_DEVICE_NOT_CONNECTED;
   int16_t whammy = -32768;
   int16_t tilt = 0;
   uint16_t buttons = 0;
   {
     std::lock_guard lock(mutex_);
+    if (players_[p].keyboard.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
+    if (!out_state) return X_ERROR_SUCCESS;
+    std::memset(out_state, 0, sizeof(*out_state));
     if (has_focus_ && !g_suppressed && is_active()) {
-      buttons = ComputeButtonsLocked(&whammy, &tilt);
+      buttons = ComputeButtonsLocked(p, &whammy, &tilt);
+    } else if (players_[p].mode != Mode::kGuitar) {
+      whammy = 0;
     }
-    packet_number_++;
-    out_state->packet_number = packet_number_;
+    out_state->packet_number = ++players_[p].packet_number;
   }
-  buttons |= AutoPressButtons();
+  if (p == 0) buttons |= AutoPressButtons();
   out_state->gamepad.buttons = buttons;
   out_state->gamepad.thumb_rx = whammy;
   out_state->gamepad.thumb_ry = tilt;
@@ -428,27 +599,20 @@ X_RESULT KeyboardGuitarDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_st
 }
 
 X_RESULT KeyboardGuitarDriver::SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION*) {
-  if (id != kKeyboardGuitarDevice || !KeyboardGuitarDriverEnabled()) {
-    return X_ERROR_DEVICE_NOT_CONNECTED;
-  }
-  return X_ERROR_SUCCESS;
+  return DevicePlayer(id) < 0 ? X_ERROR_DEVICE_NOT_CONNECTED : X_ERROR_SUCCESS;
 }
 
-X_RESULT KeyboardGuitarDriver::GetDeviceKeystroke(DeviceId id, uint32_t,
-                                                  X_INPUT_KEYSTROKE* out_keystroke) {
-  if (id != kKeyboardGuitarDevice || !KeyboardGuitarDriverEnabled()) {
-    return X_ERROR_DEVICE_NOT_CONNECTED;
-  }
+X_RESULT KeyboardGuitarDriver::GetDeviceKeystroke(DeviceId id, uint32_t, X_INPUT_KEYSTROKE* out_keystroke) {
+  const int p = DevicePlayer(id);
+  if (p < 0) return X_ERROR_DEVICE_NOT_CONNECTED;
   std::lock_guard lock(mutex_);
-  if (keystrokes_.empty()) return X_ERROR_EMPTY;
-  if (out_keystroke) *out_keystroke = keystrokes_.front();
-  keystrokes_.pop();
+  if (players_[p].keyboard.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
+  auto& q = players_[p].keystrokes;
+  if (q.empty()) return X_ERROR_EMPTY;
+  if (out_keystroke) *out_keystroke = q.front();
+  q.pop();
   return X_ERROR_SUCCESS;
-}
-
-bool KeyboardGuitarDriverEnabled() {
-  std::lock_guard cfg_lock(re_wor::de::Mutex());
-  return re_wor::de::Get().input.keyboard_guitar;
 }
 
 }  // namespace re_wor::input
+
