@@ -32,7 +32,7 @@ const I = {
   alignb: 'M3 20h18M7 6h4v10H7zM14 10h4v6h-4z',
   disth: 'M4 4v16M20 4v16M9 8h6v8H9z',
   distv: 'M4 4h16M4 20h16M8 9h8v6H8z',
-  front: 'M8 8h12v12H8zM4 16V4h12',
+  tofront: 'M8 8h12v12H8zM4 16V4h12',
   back: 'M4 4h12v12H4zM20 8v12H8',
   link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   gamepad: 'M7 8h10a4 4 0 0 1 4 4v1.5a3.5 3.5 0 0 1-6.3 2.1L13.5 14h-3l-1.2 1.6A3.5 3.5 0 0 1 3 13.5V12a4 4 0 0 1 4-4zM7 10.5v3M5.5 12h3M15.5 11.5h.01M17.5 13h.01',

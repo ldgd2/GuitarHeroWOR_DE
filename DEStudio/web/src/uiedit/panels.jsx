@@ -11,7 +11,6 @@ import { LayerCanvas, cachedRaster, useRasterVersion } from '../studio/LayerCanv
 import { SYSTEM_FONTS } from '../studio/raster.js';
 import { ACCEPT, FontPicker, uploadFiles } from './resources.jsx';
 import { ImageEditor } from './ImageEditor.jsx';
-import { SelFx } from './SelFx.jsx';
 import {
   ACTIONS, CAM25, SCRIPT_PRESETS, SHAPES, SHAPE_ICON, TYPES, TYPE_ICON, ancestors, cam25At, childrenOf, clean, clipOf, descendants,
   fmt, focusables, keyAtClip, propsFor, removeKey, setProp, stateAt,

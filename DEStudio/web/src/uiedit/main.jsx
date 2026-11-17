@@ -516,7 +516,7 @@ function App() {
       { label: 'Agrupar', icon: 'group', kbd: 'Ctrl+G', disabled: !sel.length, act: group },
       { label: 'Desagrupar', icon: 'ungroup', kbd: 'Ctrl+Mayus+G', disabled: !selLayers.some(l => l.type === 'group'), act: ungroup },
       { sep: 1 },
-      { label: 'Traer al frente', icon: 'front', kbd: 'Ctrl+Mayus+]', disabled: !sel.length, act: () => arrange('front') },
+      { label: 'Traer al frente', icon: 'tofront', kbd: 'Ctrl+Mayus+]', disabled: !sel.length, act: () => arrange('front') },
       { label: 'Traer adelante', kbd: 'Ctrl+]', disabled: !sel.length, act: () => arrange('up') },
       { label: 'Enviar atras', kbd: 'Ctrl+[', disabled: !sel.length, act: () => arrange('down') },
       { label: 'Enviar al fondo', icon: 'back', kbd: 'Ctrl+Mayus+[', disabled: !sel.length, act: () => arrange('back') },

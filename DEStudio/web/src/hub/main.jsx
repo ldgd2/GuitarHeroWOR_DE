@@ -11,6 +11,11 @@ const MODES = [['2d', '2D', 'screen', 'Pantallas planas con imagenes, SVG, texto
   ['25d', '2.5D', 'film', 'Capas a distintas profundidades y una camara que se mueve: paralaje.'],
   ['3d', '3D', 'cube', 'Planos en el espacio con varias camaras, claves y cortes.']];
 const MODE_LABEL = { '2d': '2D', '25d': '2.5D', '3d': '3D' };
+const KIND = {
+  song: ['Canción', 'music'],
+  ui: ['Interfaz', 'screen'],
+};
+const kindInfo = k => KIND[k] || [k || 'Proyecto', 'folder'];
 const ago = s => {
   const d = (Date.now() / 1000 - s);
   if (d < 90) return 'hace un momento';
@@ -95,10 +100,10 @@ function Hub() {
             {lib && !shown.length && <div className="hub-muted">{lib.length ? 'Nada coincide.' : 'Todavia no hay proyectos. Crea uno arriba o abre un archivo .desp.'}</div>}
             {shown.map(r => (
               <div key={r.file} className="hub-row">
-                <Icon n={KIND[r.kind][1]} s={18} />
+                <Icon n={kindInfo(r.kind)[1]} s={18} />
                 <a className="hub-rowmain" href={editorUrl(r)}>
                   <b>{r.file}</b>
-                  <span>{KIND[r.kind][0]}{r.kind === 'ui' ? ' ' + (MODE_LABEL[r.mode] || '2D') : r.song ? '  ' + (songName(r.song) || r.title || r.song) : ''}</span>
+                  <span>{kindInfo(r.kind)[0]}{r.kind === 'ui' ? ' ' + (MODE_LABEL[r.mode] || '2D') : r.song ? '  ' + (songName(r.song) || r.title || r.song) : ''}</span>
                 </a>
                 <span className="hub-meta">{ago(r.modified)}  {(r.size / 1024).toFixed(0)} KB</span>
                 {confirmDel === r.file
