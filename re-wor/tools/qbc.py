@@ -23,7 +23,7 @@ Sintaxis (parecida a la de Neversoft):
         return y = <x>
     endscript
 
-Valores: 12, -3, 1.5, "texto", w"texto ancho", qs(0x1234abcd), nombre, $global,
+Valores: 12, -3, 1.5, "texto", w"texto ancho", qs(0x1234abcd), nombre, #0x1234abcd (clave), $global,
 <local>, <...> (todos los parametros), {estructura}, [array], (expresion).
 Un '-' pegado a un numero es el signo (-1); para restar, con espacio: <x> - 1.
 Operadores: = (asignar y comparar), != < > <= >= + - * / . , : not and or.
@@ -59,6 +59,7 @@ TOKEN = re.compile(r'''
   | (?P<qs>qs\(\s*(?:0x[0-9a-fA-F]+)\s*\))
   | (?P<allargs><\.\.\.>)
   | (?P<local><[A-Za-z_][A-Za-z0-9_]*>)
+  | (?P<key>\#0x[0-9a-fA-F]+)
   | (?P<hex>0x[0-9a-fA-F]+)
   | (?P<float>-?\d+\.\d*|-?\.\d+)
   | (?P<int>-?\d+)
@@ -160,6 +161,8 @@ def emit_value(out: bytearray, t, line):
         out += b'\x17' + struct.pack('<i', int(text))
     elif kind == 'hex':
         out += b'\x17' + struct.pack('<I', int(text, 16))
+    elif kind == 'key':   # #0x1234abcd: una clave (checksum) dada por su valor, p. ej. una textura sin nombre
+        out += b'\x16' + struct.pack('<I', int(text[1:], 16))
     elif kind == 'float':
         out += b'\x1A' + struct.pack('<f', float(text))
     elif kind == 'str':

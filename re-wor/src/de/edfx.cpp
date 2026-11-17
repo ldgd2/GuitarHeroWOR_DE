@@ -346,7 +346,7 @@ struct Masked {
   }
 };
 
-// ---- Efectos dibujados: copia exacta de EditorSong/web/src/viewport/fx2d.js (si cambias uno, cambia el otro) ----
+// ---- Efectos dibujados: copia exacta de DEStudio/web/src/viewport/fx2d.js (si cambias uno, cambia el otro) ----
 struct Act { float k = 0, el = 0, left = 0; };
 using ActMap = std::unordered_map<std::string, Act>;
 float Fr(float x) { return x - std::floor(x); }

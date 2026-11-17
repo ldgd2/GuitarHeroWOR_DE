@@ -10,7 +10,7 @@
 # Que hace, en orden:
 #   1. Herramientas (con winget): Git, Python 3.14, Node.js LTS, CMake, LLVM/Clang, Visual Studio 2022 Build Tools (C++ y Windows SDK)
 #   2. Repositorios de terceros: rexglue-sdk (version fijada + nuestros cambios) y Guitar Hero SDK (diccionario de nombres)
-#   3. Dependencias de Python (requirements.txt) y del editor web (npm), y compila EditorSong
+#   3. Dependencias de Python (requirements.txt) y del editor web (npm), y compila DE Studio
 #   4. Archivos del juego: los extrae de tu ISO si se la das (el repo NO incluye nada del juego)
 #   5. Compila re-wor: configurar CMake, generar el codigo del xex (solo la primera vez) y compilar
 param(
@@ -178,26 +178,26 @@ Get-ChildItem $RexPatch -Recurse -File | ForEach-Object {
 Ok "rexglue-sdk $RexTag + cambios de re-wor ($n archivos actualizados)"
 
 if (-not (Test-Path (Join-Path $GhsdkDir "SDKCode"))) {
-    Info "Clonando Guitar Hero SDK (diccionario de nombres QBKey que usa EditorSong)..."
+    Info "Clonando Guitar Hero SDK (diccionario de nombres QBKey que usa DE Studio)..."
     git -c core.longpaths=true clone $GhsdkUrl $GhsdkDir
     if ($LASTEXITCODE -eq 0) { git -C $GhsdkDir -c advice.detachedHead=false checkout -q $GhsdkCommit }
-    if ($LASTEXITCODE -ne 0) { Aviso "No se pudo clonar el Guitar Hero SDK: EditorSong funciona, pero mostrara algunos nombres como numeros." }
+    if ($LASTEXITCODE -ne 0) { Aviso "No se pudo clonar el Guitar Hero SDK: DE Studio funciona, pero mostrara algunos nombres como numeros." }
     else { Ok "Guitar Hero SDK" }
 } else {
     Ok "Guitar Hero SDK ya esta"
 }
 
 # ---- 3. Python y editor --------------------------------------------------------------------------------------------
-Paso "3/5 Dependencias de Python y EditorSong"
+Paso "3/5 Dependencias de Python y DE Studio"
 Run "pip install" { python -m pip install --disable-pip-version-check -q -r (Join-Path $Root "requirements.txt") }
 Ok "Python: $((Get-Content (Join-Path $Root 'requirements.txt') | Where-Object { $_ -and -not $_.StartsWith('#') }) -join ', ')"
 
-Push-Location (Join-Path $Root "EditorSong\web")
+Push-Location (Join-Path $Root "DEStudio\web")
 try {
     Run "npm ci" { npm ci --no-audit --no-fund --loglevel=error }
-    Run "Compilar EditorSong" { npm run build --silent }
+    Run "Compilar DE Studio" { npm run build --silent }
 } finally { Pop-Location }
-Ok "EditorSong compilado (EditorSong\web\dist)"
+Ok "DE Studio compilado (DEStudio\web\dist)"
 
 # ---- 4. archivos del juego -----------------------------------------------------------------------------------------
 Paso "4/5 Archivos del juego (de tu copia)"
@@ -261,11 +261,11 @@ if ($ConMovil) {
         InstalarPaquete "Google.AndroidStudio"
         Aviso "Abre Android Studio una vez para que descargue el Android SDK; luego ejecuta 'flutter doctor --android-licenses' y vuelve a ejecutar setup.bat -ConMovil."
     } else {
-        Push-Location (Join-Path $Root "EditorSong\vcam_app")
+        Push-Location (Join-Path $Root "DEStudio\vcam_app")
         try {
             Run "flutter pub get" { flutter pub get }
             Run "Compilar la app" { flutter build apk --release }
-            Ok "EditorSong\vcam_app\build\app\outputs\flutter-apk\app-release.apk"
+            Ok "DEStudio\vcam_app\build\app\outputs\flutter-apk\app-release.apk"
         } finally { Pop-Location }
     }
 }
@@ -281,5 +281,5 @@ if ($script:Avisos.Count) {
 Write-Host ""
 Write-Host "  Juego:       run_game.bat"
 Write-Host "  Recompilar:  build.bat"
-Write-Host "  EditorSong:  EditorSong\EditorSong.bat"
+Write-Host "  DE Studio:   DEStudio\DEStudio.bat"
 Write-Host "  Mods:        wormod.bat"

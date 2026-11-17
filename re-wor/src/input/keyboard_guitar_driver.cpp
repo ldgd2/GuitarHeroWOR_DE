@@ -235,6 +235,12 @@ void KeyboardGuitarDriver::ReloadBindings() {
     guitar_subtype = cfg.input.keyboard_guitar_subtype;
   }
   std::lock_guard lock(mutex_);
+  uint8_t old_subtype[kPlayers];
+  bool old_connected[kPlayers];
+  for (int i = 0; i < kPlayers; i++) {
+    old_subtype[i] = players_[i].subtype;
+    old_connected[i] = !players_[i].keyboard.empty();
+  }
   for (int i = 0; i < kPlayers; i++) {
     Player& pl = players_[i];
     const auto& c = players[i];
@@ -257,6 +263,14 @@ void KeyboardGuitarDriver::ReloadBindings() {
     pl.subtype = 1;       // GAMEPAD
     for (int a = 0; a < static_cast<int>(re_wor::de::PadAction::kCount); a++)
       pl.pad[a] = ParseKeyList(re_wor::de::DefaultPadKeys(static_cast<re_wor::de::PadAction>(a)));
+  }
+  for (int i = 0; i < kPlayers; i++) {
+    Player& pl = players_[i];
+    if (old_connected[i] && !pl.keyboard.empty() && old_subtype[i] != pl.subtype) {
+      pl.unplugged_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(600);
+      TRACE("[Input] jugador " << (i + 1) << ": su mando de teclado cambia de tipo (" << int(old_subtype[i]) << " -> "
+                                << int(pl.subtype) << "), se reconecta");
+    }
   }
   RefreshKeystrokesLocked();
 }
@@ -556,7 +570,7 @@ void KeyboardGuitarDriver::EnumerateDevices(std::vector<DeviceInfo>& out) {
 X_RESULT KeyboardGuitarDriver::GetDeviceCapabilities(DeviceId id, uint32_t, X_INPUT_CAPABILITIES* out_caps) {
   const int p = DevicePlayer(id);
   std::lock_guard lock(mutex_);
-  if (p < 0 || players_[p].keyboard.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
+  if (p < 0 || players_[p].keyboard.empty() || UnpluggedLocked(p)) return X_ERROR_DEVICE_NOT_CONNECTED;
   if (out_caps) {
     std::memset(out_caps, 0, sizeof(*out_caps));
     out_caps->type = XINPUT_DEVTYPE_GAMEPAD;
@@ -581,7 +595,7 @@ X_RESULT KeyboardGuitarDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_st
   uint16_t buttons = 0;
   {
     std::lock_guard lock(mutex_);
-    if (players_[p].keyboard.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
+    if (players_[p].keyboard.empty() || UnpluggedLocked(p)) return X_ERROR_DEVICE_NOT_CONNECTED;
     if (!out_state) return X_ERROR_SUCCESS;
     std::memset(out_state, 0, sizeof(*out_state));
     if (has_focus_ && !g_suppressed && is_active()) {

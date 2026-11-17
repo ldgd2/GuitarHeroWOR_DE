@@ -1,5 +1,5 @@
 // SANDBOX DE RENDER de re-wor: se ejecuta en la GPU del PC justo despues de que el juego dibuja el escenario y
-// antes de la autopista y el HUD. Port de los efectos de EditorSong (web/src/viewport/fx.js y fx2d.js): la cadena de
+// antes de la autopista y el HUD. Port de los efectos de DE Studio (DEStudio/web/src/viewport/fx.js y fx2d.js): la cadena de
 // filtros CSS llega ya compuesta como matriz de color (C++: render_sandbox.cpp), lo demas se calcula aqui.
 //
 // Se recarga EN CALIENTE: guarda este archivo con el juego abierto y se recompila (errores en re_wor_trace.log).

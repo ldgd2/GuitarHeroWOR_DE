@@ -39,13 +39,14 @@ CMakeUserPresets.json
 *.exe
 *.dll
 
-# ---- EditorSong: caches, copias de seguridad y proyectos locales -------------------------------------
-/EditorSong/cache/
-/EditorSong/backups/
-/EditorSong/projects/
-/EditorSong/web/dist/
-/EditorSong/vcam_app/android/build/
-/EditorSong/vcam_app/build/
+# ---- DE Studio: caches, copias de seguridad y proyectos locales -------------------------------------
+/DEStudio/cache/
+/DEStudio/backups/
+/DEStudio/projects/
+/DEStudio/proyectos/
+/DEStudio/web/dist/
+/DEStudio/vcam_app/android/build/
+/DEStudio/vcam_app/build/
 .gradle/
 **/android/build/
 

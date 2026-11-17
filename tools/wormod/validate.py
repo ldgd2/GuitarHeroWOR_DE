@@ -20,7 +20,7 @@ from wor_song import (WOR_CAMERAS, WOR_EVENT_SCRIPTS, WOR_MOMENT_TRACK, clip_win
 
 
 def _edfx_keys(path, name) -> set:
-    """Claves de los eventos de sincronia de EDFX (EditorSong + re-wor), si la cancion trae su .edfx."""
+    """Claves de los eventos de sincronia de EDFX (DE Studio + re-wor), si la cancion trae su .edfx."""
     from pathlib import Path
     f = Path(path).with_name(f"{name}.edfx")
     if not f.exists():

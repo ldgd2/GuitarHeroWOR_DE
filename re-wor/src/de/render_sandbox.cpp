@@ -1,4 +1,4 @@
-// SANDBOX DE RENDER (re-wor). Lo que se ve en EditorSong se dibuja igual en el juego con una pasada propia en la
+// SANDBOX DE RENDER (re-wor). Lo que se ve en DE Studio se dibuja igual en el juego con una pasada propia en la
 // GPU del PC, sin depender de los pocos filtros ScreenFX del motor de GH.
 //
 // Como funciona:
@@ -6,7 +6,7 @@
 //  2. ENGANCHE: el Xenos dibuja en EDRAM y copia (resolve) la imagen a memoria. El escenario terminado se resuelve a
 //     pantalla completa ANTES de dibujar la autopista y el HUD, que van en el resolve final del frame.
 //  3. Justo antes de ese primer resolve, el SDK ejecuta re-wor/sandbox/sandbox.hlsl sobre esa imagen con los
-//     parametros que calcula este archivo (port de EditorSong web/src/viewport/fx.js: la cadena de filtros CSS se
+//     parametros que calcula este archivo (port de DE Studio web/src/viewport/fx.js: la cadena de filtros CSS se
 //     compone en una matriz de color con las formulas del W3C).
 //  4. El .hlsl se recarga en caliente: se puede meter cualquier efecto sin recompilar el juego.
 // Si algo falla (sin enganche, sin pasadas), todo vuelve solo al camino anterior (native_fx + capa ImGui).

@@ -1,6 +1,6 @@
 #pragma once
 // =============================================================================
-// EDFX: lo que el editor de canciones (EditorSong) pone en una cancion y WoR no sabe hacer por si mismo:
+// EDFX: lo que el editor de canciones (DE Studio) pone en una cancion y WoR no sabe hacer por si mismo:
 // efectos de imagen (franjas de cine, fundidos, destellos, vineta, filtros...), objetos 3D y textos.
 //
 // Como llega al juego:

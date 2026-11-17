@@ -1,0 +1,102 @@
+/* DE Studio: tokens, tipografia y controles.
+   Concepto: sala de control de un directo. Grafito neutro (ligeramente frio) para que mande la imagen; un solo acento
+   ambar (luz de escenario) para lo activo: cursor de reproduccion, seleccion y accion principal. El rojo "tally" es
+   solo para PROGRAMA y GRABANDO. Tema oscuro unico, como las suites de edicion de video. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+:root {
+  --bg: #0d0f12;          /* fondo de la aplicacion y de las vistas */
+  --panel: #14171b;       /* paneles */
+  --panel2: #1a1e23;      /* campos, tarjetas */
+  --panel3: #222730;      /* hover, seleccion suave */
+  --line: #252a31;        /* separadores */
+  --line2: #323943;       /* bordes de control */
+  --text: #e4e6e9;
+  --muted: #9097a2;
+  --faint: #626a75;
+  --accent: #e3a043;      /* ambar de escenario */
+  --accent-ink: #1a1206;
+  --accent-soft: rgba(227, 160, 67, .14);
+  --accent2: #7ea6e0;     /* informacion / foco secundario */
+  --tally: #e5484d;       /* programa en el aire y grabacion */
+  --danger: #e5484d; --ok: #3fb67a;
+  --radius: 6px; --r-ctl: 4px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --shadow: 0 12px 32px rgba(0, 0, 0, .5), 0 0 0 1px rgba(255, 255, 255, .04);
+  --font: 'Inter Variable', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono Variable', ui-monospace, Consolas, monospace;
+  font: 12.5px/1.45 var(--font);
+  font-feature-settings: 'cv11', 'ss01';
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--panel3); border-radius: 6px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--line2); }
+::-webkit-scrollbar-track { background: transparent; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+button, select, input { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line2);
+  border-radius: var(--r-ctl); padding: 0 9px; height: 28px; outline: none; transition: border-color .12s, background .12s, color .12s; }
+input[type=number], input[type=text], input[type=search], input:not([type]) { font-variant-numeric: tabular-nums; }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+select { padding-right: 24px; appearance: none; cursor: pointer;
+  background: var(--panel2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239097a2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 7px center; }
+option, optgroup { background: var(--panel2); }
+button { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 500; }
+button:hover:not(:disabled) { border-color: var(--line2); background: var(--panel3); }
+button:active:not(:disabled) { background: var(--line); }
+button:disabled { opacity: .38; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.primary:hover:not(:disabled) { background: #eeae55; border-color: #eeae55; }
+button.danger { color: var(--danger); border-color: rgba(229, 72, 77, .4); background: transparent; }
+button.danger:hover:not(:disabled) { background: rgba(229, 72, 77, .1); border-color: var(--danger); }
+button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+button.ghost:hover:not(:disabled) { background: var(--panel3); color: var(--text); }
+button.small { height: 22px; padding: 0 7px; font-size: 11px; }
+input[type=range] { height: 18px; padding: 0; border: 0; background: none; accent-color: var(--accent); box-shadow: none; cursor: pointer; }
+input[type=color] { height: 26px; }
+textarea { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line2); border-radius: var(--r-ctl); }
+.ico { flex: none; display: block; }
+kbd { font: 500 10.5px var(--mono); background: var(--panel3); border: 1px solid var(--line2); border-bottom-width: 2px;
+  border-radius: 3px; padding: 0 4px; color: var(--text); }
+code, .mono { font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+code { background: var(--panel3); border-radius: 3px; padding: 0 4px; word-break: break-all; }
+h3, h4 { text-wrap: balance; }
+
+/* interruptor */
+.check { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 3px 0; user-select: none; }
+.check input { display: none; }
+.check .box { width: 26px; height: 15px; border-radius: 8px; background: var(--panel3); border: 1px solid var(--line2); position: relative; flex: none;
+  transition: background .18s var(--ease), border-color .18s; }
+.check .box::after { content: ""; position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted);
+  transition: transform .18s var(--ease), background .18s; }
+.check input:checked + .box { background: var(--accent-soft); border-color: var(--accent); }
+.check input:checked + .box::after { transform: translateX(11px); background: var(--accent); }
+
+.muted { color: var(--muted); } .small { font-size: 11px; }
+.warn { color: var(--accent); } .err { color: var(--danger); } .okc, .ok { color: var(--ok); }
+.withIco { display: inline-flex; align-items: center; gap: 7px; }
+canvas { display: block; }
+
+/* piloto de estado (conectado, en el aire) */
+.led { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); margin-right: 7px; vertical-align: 1px; }
+.led.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(63, 182, 122, .18); }
+.recline { display: flex; align-items: center; gap: 7px; color: var(--tally); font-weight: 600; }
+.recline .ico { animation: blink 1s steps(2) infinite; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 50% { opacity: .25; } }
+.fade { animation: fadeUp .18s var(--ease); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+#boot { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center; justify-items: center; gap: 12px; background: var(--bg);
+  color: var(--muted); transition: opacity .35s; }
+#boot p { margin: 0; font-size: 12px; letter-spacing: .02em; }
+#boot.done { opacity: 0; pointer-events: none; }
+.spinner { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--panel3); border-top-color: var(--accent); animation: spin .8s linear infinite; }

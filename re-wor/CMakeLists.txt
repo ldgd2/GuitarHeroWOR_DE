@@ -67,6 +67,9 @@ set(REWOR_SOURCES
     src/de/engine_fixes.cpp
     src/de/language.cpp
     src/de/edfx.cpp
+    src/de/ui3d.cpp
+    src/de/wui_vm.cpp
+    src/de/wui_stdlib.cpp
     src/de/native_fx.cpp
     src/de/render_sandbox.cpp
     src/de/cam_watch.cpp

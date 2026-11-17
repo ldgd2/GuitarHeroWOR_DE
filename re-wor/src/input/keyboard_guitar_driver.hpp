@@ -9,6 +9,7 @@
 // (raw input, KeyEvent::keyboard_id): dos teclados con las mismas teclas no se pisan.
 // =============================================================================
 
+#include <chrono>
 #include <rex/input/input_driver.h>
 #include <rex/ui/window_listener.h>
 
@@ -106,7 +107,11 @@ class KeyboardGuitarDriver final : public rex::input::InputDriver,
     uint32_t pressed = 0;          // bitmask por accion (para keystrokes)
     std::queue<rex::input::X_INPUT_KEYSTROKE> keystrokes;
     uint32_t packet_number = 0;
+    // el juego mira el tipo de mando solo al conectarse: si cambia (otro instrumento), el mando virtual se
+    // "desenchufa" un momento para que lo vuelva a leer
+    std::chrono::steady_clock::time_point unplugged_until{};
   };
+  bool UnpluggedLocked(int p) const { return std::chrono::steady_clock::now() < players_[p].unplugged_until; }
 
   rex::ui::Window* attached_window_ = nullptr;
   std::mutex mutex_;

@@ -21,6 +21,7 @@
 #include "core/crash_handler.hpp"
 #include "de/de_config.hpp"
 #include "de/edfx.hpp"
+#include "de/ui3d.hpp"
 #include "de/render_sandbox.hpp"
 #include "de/cam_watch.hpp"
 #include "de/mod_manager.hpp"
@@ -557,6 +558,7 @@ void OnLogicFrameExtras(PPCContext& ctx, uint8_t* base) {
     TRACE("[SkipIntro] videos parados");
   }
   edfx::OnLogicFrame(base);
+  ui3d::OnLogicFrame(base);   // interfaces 3D de DE Studio (ordenes de los scripts, recarga)
   nativefx::Tick(ctx, base);
   sandbox::OnLogicFrame();
   camwatch::Tick();   // vigia de la camara (diagnostico, una vez)

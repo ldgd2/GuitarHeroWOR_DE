@@ -15,6 +15,7 @@
 #include "de/qb_bridge.hpp"
 #include "de/gfx_options.hpp"
 #include "de/edfx.hpp"
+#include "de/ui3d.hpp"
 #include "de/render_sandbox.hpp"
 #include "diagnostics/stubs.hpp"
 #include "generated/re_wor_init.h"
@@ -318,6 +319,9 @@ void ReWorApp::OnCreateDialogs(rex::ui::ImGuiDrawer* imgui) {
   // Capa de efectos del editor de canciones (EDFX): siempre presente, solo dibuja durante las canciones que
   // traen un .edfx. Se borra sola con el drawer.
   new re_wor::de::edfx::EdfxOverlay(imgui);
+  // Interfaces 3D de DE Studio (ui3d/<nombre>/scene.ui3d): solo dibuja las que un script ha abierto.
+  re_wor::de::ui3d::SetRuntime(runtime());
+  new re_wor::de::ui3d::Ui3dOverlay(imgui);
   // Atajos del SDK (ya registrados con sus teclas de fabrica): se aplican las del toml.
   const std::pair<const char*, std::string> sdk_binds[] = {
       {"bind_debug_overlay", re_wor::de::HotkeyOr(hk.perf_overlay, "F9")},

@@ -1,0 +1,81 @@
+/* Barra superior, rejilla principal (vista 3D | monitor de programa | panel con riel), capas sobre las vistas,
+   modal y avisos. */
+#ui-top { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 12px; background: var(--panel);
+  border-bottom: 1px solid var(--line); position: relative; z-index: 30; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px; letter-spacing: -.005em; color: var(--text);
+  padding-right: 12px; margin-right: 2px; border-right: 1px solid var(--line); height: 24px; }
+.brand svg { color: var(--accent); }
+.sep { flex: 1; }
+.tbDiv { width: 1px; height: 20px; background: var(--line); flex: none; }
+.songname { display: flex; flex-direction: column; justify-content: center; min-width: 0; max-width: 300px; line-height: 1.2; }
+.songname b { font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: flex; align-items: center; gap: 7px; }
+.songname small { color: var(--muted); font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.songname .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.venue { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.venue select { max-width: 190px; }
+#ui-top button.ghost .ico { color: var(--muted); }
+#ui-top button.ghost:hover .ico { color: var(--text); }
+@media (max-width: 1500px) { #ui-top .lbl { display: none; } #ui-top button.primary .lbl { display: inline; } }
+
+.songpick { position: relative; }
+.songpick input { width: 280px; padding-left: 30px; background: var(--bg); border-color: var(--line); }
+.songpick input:hover { border-color: var(--line2); }
+.songpick .sicon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--faint); display: flex; pointer-events: none; }
+.dropdown { position: absolute; top: calc(100% + 6px); left: 0; width: 480px; max-height: 65vh; overflow: auto; z-index: 40;
+  background: var(--panel2); border: 1px solid var(--line2); border-radius: var(--radius); box-shadow: var(--shadow); padding: 4px;
+  opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity .12s, transform .16s var(--ease); }
+.dropdown.open { opacity: 1; transform: none; pointer-events: auto; }
+.dropdown div { padding: 6px 10px; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.dropdown div.hi { background: var(--panel3); }
+.dropdown p { margin: 8px 10px; }
+.badge { font-size: 10px; font-weight: 500; padding: 1px 7px; border-radius: 3px; background: var(--panel3); color: var(--muted); flex: none; letter-spacing: .01em; }
+.badge.ok { background: rgba(63, 182, 122, .12); color: var(--ok); }
+
+#layout { height: calc(100% - 44px); display: grid; grid-template-columns: 1fr 440px 404px; grid-template-rows: 1fr var(--tlH, 46vh);
+  transition: grid-template-columns .25s var(--ease); background: var(--line); gap: 1px; }
+#layout > * { background: var(--bg); }
+body.maxView #layout { grid-template-columns: 1fr 0 404px; }
+#viewWrap { grid-column: 1; grid-row: 1; position: relative; min-height: 0; overflow: hidden; }
+#monWrap { grid-column: 2; grid-row: 1; position: relative; min-height: 0; background: #000; overflow: hidden; }
+#ui-panel { grid-column: 3; grid-row: 1 / span 2; background: var(--panel); display: flex; min-height: 0; }
+#tlWrap { grid-column: 1 / span 2; grid-row: 2; display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+#view, #monitor { width: 100%; height: 100%; outline: none; }
+
+/* rotulos de las vistas (estilo mesa de realizacion) */
+.overlay { position: absolute; padding: 3px 8px; background: rgba(13, 15, 18, .72); backdrop-filter: blur(8px); border-radius: 3px;
+  pointer-events: none; z-index: 3; font-size: 11px; color: var(--muted); }
+.overlay.tl { top: 8px; left: 8px; font-weight: 500; font-size: 11px; color: var(--text); }
+.overlay.tr { top: 8px; right: 8px; max-width: 55%; }
+.overlay.br { bottom: 8px; right: 8px; }
+.overlay.tag { font-size: 10px; letter-spacing: .14em; color: #fff; font-weight: 700; background: var(--tally); padding: 3px 7px; }
+#bandInfo:empty { display: none; }
+
+/* barra flotante de la vista 3D */
+#ui-viewtools .tools { position: absolute; z-index: 4; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 1px; padding: 3px;
+  background: rgba(20, 23, 27, .88); backdrop-filter: blur(10px); border: 1px solid var(--line2); border-radius: 7px; box-shadow: var(--shadow); }
+.tool { width: 30px; height: 28px; justify-content: center; padding: 0; background: transparent; border-color: transparent; border-radius: 4px; color: var(--muted); }
+.tool:hover:not(:disabled) { color: var(--text); background: var(--panel3); border-color: transparent; }
+.tool.on { color: var(--accent); background: var(--accent-soft); }
+.tool.role { font: 600 11px var(--mono); color: var(--c); }
+.tools .div { width: 1px; background: var(--line2); margin: 4px 3px; }
+.loadbar { position: absolute; left: 0; right: 0; top: 0; height: 2px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+.loadbar.on { opacity: 1; }
+.loadbar i { display: block; height: 100%; background: var(--accent); transition: width .25s var(--ease); }
+.loadbar span { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); font-size: 11px; background: rgba(13, 15, 18, .8);
+  padding: 3px 10px; border-radius: 3px; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* modal y avisos */
+.backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(5, 6, 8, .6); display: grid; place-items: center; animation: fadeUp .12s; }
+.modal { width: min(600px, 92vw); max-height: 85vh; overflow: auto; background: var(--panel); border: 1px solid var(--line2); border-radius: 8px;
+  padding: 18px 20px 16px; box-shadow: var(--shadow); animation: pop .18s var(--ease); }
+.modal h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; } .modal ul { padding-left: 18px; }
+.modal .row { margin: 4px 0; }
+.modal input.wide { width: 100%; margin-top: 6px; }
+.modal menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 18px 0 0; }
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.toast { max-width: 420px; padding: 9px 14px 9px 12px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--line2);
+  box-shadow: var(--shadow); animation: pop .2s var(--ease); display: flex; gap: 10px; align-items: flex-start; }
+.toast::before { content: ""; width: 3px; align-self: stretch; border-radius: 2px; background: var(--ok); flex: none; }
+.toast.warn::before { background: var(--accent); } .toast.err::before { background: var(--danger); }
+.brand a { color: inherit; text-decoration: none; }
+.brand small { font-weight: 400; }
