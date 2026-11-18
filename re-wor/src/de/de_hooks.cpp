@@ -24,10 +24,12 @@
 #include "de/ui3d.hpp"
 #include "de/render_sandbox.hpp"
 #include "de/cam_watch.hpp"
+#include "de/d3d_tap.hpp"
 #include "de/mod_manager.hpp"
 #include "de/qb_bridge.hpp"
 #include "de/frame_pacing.hpp"
 #include "de/gfx_options.hpp"
+#include "nativegfx/device/device_tracker.hpp"
 #include "generated/re_wor_pch.h"
 
 namespace re_wor::de {
@@ -125,6 +127,9 @@ extern "C" REX_FUNC(sub_822E5E10) {
     s_window_start = now;
     s_window_frames = 0;
   }
+  re_wor::de::d3dtap::FlushPending(base);   // la ultima llamada del D3D del frame
+  re_wor::de::framecap::OnSwap(base);   // captura de frames (diagnostico, REWOR_FRAMECAP=1)
+  re_wor::nativegfx::DeviceTracker::Instance().OnSwap();
   __imp__sub_822E5E10(ctx, base);
 }
 

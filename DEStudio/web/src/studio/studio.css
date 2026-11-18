@@ -190,3 +190,45 @@ html, body, #app { height: 100%; margin: 0; background: var(--bg); color: var(--
   padding: 4px; border-radius: var(--radius); border: 1px solid var(--line2); }
 .st-3dtools button { padding: 3px 9px; }
 .st-3dtools button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* ---- linea de tiempo: altura, buscador, curvas ---- */
+.st-tl { position: relative; }
+.st-tlgrip { position: absolute; left: 0; right: 0; top: -3px; height: 6px; cursor: row-resize; z-index: 5; }
+.st-tlgrip:hover { background: var(--accent-soft); }
+.st-tlsearch { display: flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); color: var(--muted); }
+.st-tlsearch input { width: 130px; border: 0; background: none; outline: none; padding: 4px 0; color: var(--text); }
+.st-icon.on { color: var(--accent); background: var(--accent-soft); }
+.st-tlkey { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line); background: var(--panel2); font-size: 12px; flex-wrap: wrap; }
+.st-tlsep { width: 1px; height: 18px; background: var(--line2); }
+.st-tlquick { display: flex; gap: 2px; }
+.st-tlquick button { padding: 1px 2px; }
+.st-tlquick button.on { background: var(--accent-soft); border-color: var(--accent); }
+.st-curve { flex: none; background: var(--bg); border-radius: 3px; }
+.st-curve polyline { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.st-tlnames { flex-basis: 220px; }
+.st-tlruler-pad { font: 10px var(--mono); color: var(--faint); display: flex; align-items: center; padding: 0 8px; }
+.st-tlname em { margin-left: auto; font: 10px var(--mono); font-style: normal; color: var(--faint); }
+.st-tlname span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-tlname.sub.has { color: var(--muted); }
+.st-tlspan { position: absolute; top: 9px; height: 6px; background: rgba(227, 160, 67, .14); border-radius: 3px; pointer-events: none; }
+.st-tlseg { position: absolute; top: 11px; height: 2px; background: var(--line2); pointer-events: none; }
+.st-tlseg.eased { background: var(--accent); opacity: .55; }
+.st-tlseg.hold { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 8px); }
+.st-tlmenu { position: fixed; z-index: 400; display: flex; flex-direction: column; gap: 2px; min-width: 210px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line2); border-radius: var(--radius); box-shadow: var(--shadow); }
+.st-tlmenu > .st-muted { font-size: 11px; padding: 2px 4px 4px; }
+.st-tlmenu button { display: flex; align-items: center; gap: 8px; justify-content: flex-start; border: 0; background: none; text-align: left; font-size: 12px; }
+.st-tlmenu button:hover { background: var(--panel3); }
+.st-tabs { overflow-x: auto; max-width: 52%; flex-wrap: nowrap; }
+.st-tabs button { white-space: nowrap; }
+.st-tlanim { display: flex; align-items: center; gap: 6px; }
+.st-tlanim input { width: 130px; }
+.st-tlanim code { font: 11px var(--mono); padding: 2px 6px; border-radius: 4px; background: var(--bg); color: var(--accent); cursor: copy; white-space: nowrap; }
+.st-tl.side { flex: 0 0 auto; height: auto; min-height: 0; border-top: 0; border-left: 1px solid var(--line); }
+.st-tlgrip.v { left: -3px; right: auto; top: 0; bottom: 0; width: 6px; height: auto; cursor: col-resize; }
+.st-tl.side .st-tlbar, .st-tl.side .st-tlkey { flex-wrap: wrap; }
+.st-tl.side .st-tabs { max-width: 100%; }
+.st-tlmenu.rows { max-height: 460px; overflow: auto; }
+.st-tlmenu button.on { color: var(--accent); }
+.st-tlmenusep { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 6px 4px 2px; border-top: 1px solid var(--line); margin-top: 2px; }
+.st-tlmenusep:empty { padding: 0; }

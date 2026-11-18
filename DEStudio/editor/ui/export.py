@@ -47,9 +47,29 @@ def scene(proj: dict, textures: dict, work_dir: Path | None):
         im = l.get("image") or {}
         if im.get("custom"):
             f = (work_dir / im.get("file", "")) if work_dir else None
-            if f and f.is_file() and f.suffix.lower() == ".png":
+            if not (f and f.is_file()):
+                return None
+            ext = f.suffix.lower()
+            if ext == ".png":
                 return (f"c_{f.name}", f.read_bytes())
-            return None
+            import io
+            from PIL import Image
+            if ext == ".svg":       # vectorial: se rasteriza al doble del tamano en pantalla (nitido al escalar)
+                import pymupdf
+                doc = pymupdf.open(stream=f.read_bytes(), filetype="svg")
+                pg = doc[0]
+                b = l.get("base") or {}
+                want = max(float(b.get("w") or 0) * float(b.get("scale") or 1), float(b.get("h") or 0) * float(b.get("scale") or 1)) * 2
+                k = max(1.0, min(4096.0, want or 512) / max(pg.rect.width, pg.rect.height, 1))
+                pix = pg.get_pixmap(matrix=pymupdf.Matrix(k, k), alpha=True)
+                im2 = Image.frombytes("RGBA", (pix.width, pix.height), pix.samples)
+            elif ext in (".jpg", ".jpeg", ".webp"):
+                im2 = Image.open(f).convert("RGBA")
+            else:
+                return None
+            buf = io.BytesIO()
+            im2.save(buf, "PNG")
+            return (f"c_{f.stem}_{im2.width}x{im2.height}.png", buf.getvalue())
         if im.get("key") and im.get("pak"):
             return (f"g_{im['key']}.png", gameimg.png(im["pak"], im["key"]))
         return None

@@ -244,6 +244,130 @@ def read_psd(data: bytes) -> dict:
 
 
 # ================================================================== Photoshop con psd-tools (tal cual)
+
+# modos de fusion de Photoshop que dibujan el editor y el juego
+BLENDS = {"multiply": "multiply", "screen": "screen", "linear_dodge": "add", "darken": "darken", "lighten": "lighten",
+          "normal": "normal", "pass_through": "normal", "dissolve": "normal"}
+_JUST = {0: "left", 1: "right", 2: "center"}
+
+
+def _text_layer(l, group, visible, blend, warnings):
+    """capa de texto de Photoshop -> {"kind": "text", ...} (en px del documento) o None si no se puede leer"""
+    import math
+    try:
+        ed, rd = l.engine_dict, l.resource_dict
+        run = ed["StyleRun"]["RunArray"][0]["StyleSheet"]["StyleSheetData"]
+        fonts = rd["FontSet"]
+        ps = str(fonts[int(run.get("Font", 0))]["Name"]).strip("\x00 ").strip("'")
+        a, b, c, d, tx, ty = (float(v) for v in l.transform)
+        k = math.hypot(a, b) or 1.0
+        size = float(run.get("FontSize", 12)) * k
+        col = (run.get("FillColor") or {}).get("Values") or [1, 0, 0, 0]
+        rgb = [round(max(0.0, min(1.0, float(v))) * 255) for v in list(col)[1:4]]
+        try:
+            just = int(ed["ParagraphRun"]["RunArray"][0]["ParagraphSheet"]["Properties"].get("Justification", 0))
+        except Exception:
+            just = 0
+        tracking = float(run.get("Tracking", 0) or 0) / 1000.0           # milesimas de em
+        line = 1.15
+        if not run.get("AutoLeading", True) and run.get("Leading"):
+            line = max(0.5, float(run["Leading"]) / max(1e-3, float(run.get("FontSize", 12))))
+        x0, y0, x1, y1 = l.bbox
+        text = str(l.text).replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
+        bold = bool(run.get("FauxBold")) or "bold" in ps.lower()
+        italic = bool(run.get("FauxItalic")) or "italic" in ps.lower() or "oblique" in ps.lower()
+        if getattr(l, "effects", None) and len(l.effects):
+            warnings.append(f"texto '{l.name}': sus estilos de capa se pasan a los efectos del editor que existan")
+        fx = {}
+        try:
+            for e in l.effects or []:
+                n = e.__class__.__name__.lower()
+                if not getattr(e, "enabled", True):
+                    continue
+                if n == "stroke":
+                    fx["stroke"] = {"on": True, "width": float(e.size), "color": _fx_color(e), "alpha": float(e.opacity) / 100}
+                elif n == "dropshadow":
+                    ang = math.radians(float(e.angle))
+                    fx["shadow"] = {"on": True, "dx": -math.cos(ang) * float(e.distance), "dy": math.sin(ang) * float(e.distance),
+                                    "blur": float(e.size), "color": _fx_color(e), "alpha": float(e.opacity) / 100}
+                elif n == "outerglow":
+                    fx["glow"] = {"on": True, "size": float(e.size), "color": _fx_color(e), "alpha": float(e.opacity) / 100}
+        except Exception:
+            pass
+        return {"kind": "text", "name": l.name or text[:20], "text": text, "font_ps": ps, "size": size, "color": rgb,
+                "align": _JUST.get(just, "left"), "spacing": tracking, "line": line, "bold": bold, "italic": italic,
+                "rot": math.degrees(math.atan2(b, a)), "cx": (x0 + x1) / 2, "cy": (y0 + y1) / 2, "x": x0, "y": y0,
+                "w": x1 - x0, "h": y1 - y0, "opacity": float(l.opacity) / 255 if l.opacity > 1 else float(l.opacity),
+                "visible": visible, "group": group, "blend": blend, "fx": fx}
+    except Exception as ex:
+        warnings.append(f"texto '{l.name}': no se pudo leer como texto ({ex}); se importa como imagen")
+        return None
+
+
+def _fx_color(e):
+    try:
+        c = e.color
+        vals = [float(c.get(k, 0)) for k in (b"Rd  ", b"Grn ", b"Bl  ")]
+        return [round(max(0, min(255, v))) for v in vals]
+    except Exception:
+        return [0, 0, 0]
+
+
+# ---- fuentes instaladas: por nombre PostScript (el que guarda Photoshop)
+_FONT_INDEX: dict | None = None
+
+
+def _ps_name(path) -> str:
+    """nameID 6 (PostScript) de un .ttf/.otf, sin dependencias"""
+    import struct as st
+    with open(path, "rb") as f:
+        head = f.read(12)
+        if len(head) < 12:
+            return ""
+        n = st.unpack(">H", head[4:6])[0]
+        tables = f.read(16 * n)
+        for i in range(n):
+            tag, _, off, ln = st.unpack(">4sIII", tables[i * 16:i * 16 + 16])
+            if tag != b"name":
+                continue
+            f.seek(off)
+            blk = f.read(ln)
+            _, count, sto = st.unpack(">HHH", blk[:6])
+            for j in range(count):
+                pid, eid, lid, nid, sl, so = st.unpack(">HHHHHH", blk[6 + j * 12:18 + j * 12])
+                if nid != 6:
+                    continue
+                raw = blk[sto + so:sto + so + sl]
+                return raw.decode("utf-16-be", "ignore") if pid in (0, 3) else raw.decode("latin-1", "ignore")
+    return ""
+
+
+def find_font(ps_name: str):
+    """ruta del archivo de la fuente instalada con ese nombre PostScript (o None)"""
+    global _FONT_INDEX
+    import os
+    from pathlib import Path
+    if _FONT_INDEX is None:
+        _FONT_INDEX = {}
+        dirs = [Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"]
+        if os.environ.get("LOCALAPPDATA"):
+            dirs.append(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "Windows" / "Fonts")
+        dirs += [Path.home() / ".fonts", Path("/usr/share/fonts"), Path.home() / "Library" / "Fonts"]
+        for d in dirs:
+            if not d.is_dir():
+                continue
+            for f in d.rglob("*"):
+                if f.suffix.lower() in (".ttf", ".otf"):
+                    try:
+                        nm = _ps_name(f)
+                    except Exception:
+                        continue
+                    if nm:
+                        _FONT_INDEX.setdefault(nm.lower(), f)
+                    _FONT_INDEX.setdefault(f.stem.lower(), f)
+    key = (ps_name or "").lower()
+    return _FONT_INDEX.get(key) or _FONT_INDEX.get(key.replace(" ", ""))
+
 _NORMAL = {"normal", "pass_through", "BlendMode.NORMAL", "BlendMode.PASS_THROUGH"}
 
 
@@ -287,17 +411,33 @@ def read_psd_full(data: bytes) -> dict:
     for l in psd.descendants():
         if l.is_group() or getattr(l, "clipping", False):
             continue      # los grupos son carpetas; las capas recortadas van dentro de su base
-        merge = l.kind == "adjustment" or effective_blend(l) not in ("normal", "pass_through")
-        if merge and chunks and chunks[-1]["visible"] == (l.visible and not hidden_by_parent(l)):
+        vis = l.visible and not hidden_by_parent(l)
+        eb = effective_blend(l)
+        if l.kind == "type":       # texto: queda como texto editable
+            t = _text_layer(l, groups_of(l), vis, BLENDS.get(eb, "normal"), warnings)
+            if t:
+                chunks.append({"text": t})
+                continue
+        if l.kind != "adjustment" and eb in BLENDS:
+            # modo de fusion que el juego dibuja: capa propia con su modo (pintada en normal)
+            chunks.append({"layers": [l], "name": l.name, "group": groups_of(l), "visible": vis, "blend": BLENDS[eb]})
+            continue
+        merge = l.kind == "adjustment" or eb not in ("normal", "pass_through")
+        if merge and chunks and "layers" in chunks[-1] and chunks[-1]["visible"] == vis:
             chunks[-1]["layers"].append(l)
+            if eb not in ("normal", "pass_through"):
+                warnings.append(f"capa '{l.name}': el modo {eb} no lo dibuja el juego; se funde con la de abajo")
             continue
         if merge and not chunks:
             warnings.append(f"capa '{l.name}': no hay nada debajo con que fundirla")
-        chunks.append({"layers": [l], "name": l.name, "group": groups_of(l),
-                       "visible": l.visible and not hidden_by_parent(l)})
+        chunks.append({"layers": [l], "name": l.name, "group": groups_of(l), "visible": vis})
 
+    from psd_tools.constants import BlendMode
     layers = []
     for ch in chunks:
+        if "text" in ch:
+            layers.append(ch["text"])
+            continue
         keep = set()
         for l in ch["layers"]:
             keep.add(id(l))
@@ -307,11 +447,25 @@ def read_psd_full(data: bytes) -> dict:
             while p is not None and p is not psd:
                 keep.add(id(p))
                 p = p.parent
+        saved = []
+        if ch.get("blend"):          # se pinta en normal: el modo lo aplican el editor y el juego
+            l0 = ch["layers"][0]
+            saved.append((l0, l0.blend_mode))
+            try:
+                l0.blend_mode = BlendMode.NORMAL
+            except Exception:
+                pass
         try:
             im = psd.composite(force=True, alpha=0.0, layer_filter=lambda x: id(x) in keep)
         except Exception as ex:
             warnings.append(f"capa '{ch['name']}': no se pudo pintar ({ex})")
             continue
+        finally:
+            for l0, bm in saved:
+                try:
+                    l0.blend_mode = bm
+                except Exception:
+                    pass
         if im is None:
             continue
         im = im.convert("RGBA")
@@ -322,7 +476,8 @@ def read_psd_full(data: bytes) -> dict:
         buf = io.BytesIO()
         im.save(buf, "PNG", optimize=True)
         layers.append({"name": ch["name"] or "capa", "png": buf.getvalue(), "x": bbox[0], "y": bbox[1],
-                       "w": im.width, "h": im.height, "opacity": 1.0, "visible": ch["visible"], "group": ch["group"]})
+                       "w": im.width, "h": im.height, "opacity": 1.0, "visible": ch["visible"], "group": ch["group"],
+                       "blend": ch.get("blend", "normal")})
     return {"w": W, "h": H, "layers": layers, "warnings": sorted(set(warnings))}
 
 

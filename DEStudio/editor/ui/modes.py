@@ -37,6 +37,59 @@ BASE3D = {"x": 0.0, "y": 0.0, "z": 0.0, "rx": 0.0, "ry": 0.0, "rz": 0.0, "w": 40
 VISUAL = ("image", "text", "shape")
 OPS = ("=", "!=", ">", "<", ">=", "<=")
 
+# efectos en vivo (los dibuja re-wor cada fotograma): orden en la linea "o" tras las esquinas
+LIVE = (("e_glow", 0.0), ("e_glowc", [255, 200, 120]), ("e_glowa", 1.0), ("e_blur", 0.0), ("e_chroma", 0.0),
+        ("e_bright", 1.0), ("e_sat", 1.0), ("e_inv", 0.0), ("e_hue", 0.0), ("e_grain", 0.0), ("e_flicker", 0.0), ("e_shake", 0.0))
+def action_of(ui):
+    """accion al pulsar: ui.action (formato anterior) o la primera de ui.actions (variable en target $nombre)"""
+    a = dict(ui.get("action") or ((ui.get("actions") or [None])[0]) or {})
+    if not a.get("global") and str(a.get("target") or "").startswith("$"):
+        a["global"] = a["target"][1:]
+    return a
+
+
+LIST_DEFAULT = {"on": False, "axis": "y", "view": 4, "step": 0, "loop": True, "center": True, "fade": True, "clip": True,
+                "wheel": True}
+
+
+def list_target(L, off, idx):
+    """desplazamiento (elemento en el primer hueco) que deja visible el elemento idx (igual que lists.js)"""
+    view, n, c = L["view"], L["n"], (L["view"] - 1) // 2
+    if not L["loop"]:
+        mx = max(0, n - view)
+        if L["center"]:
+            return float(max(0, min(mx, idx - c)))
+        if idx < off:
+            return float(idx)
+        if idx > off + view - 1:
+            return float(min(mx, idx - view + 1))
+        return float(max(0, min(mx, off)))
+    rel = idx - off
+    rel -= n * math.floor((rel - (view - 1) / 2) / n + 0.5)
+    if L["center"]:
+        return off + rel - c
+    if rel < 0:
+        return off + rel
+    if rel > view - 1:
+        return off + rel - (view - 1)
+    return off
+
+
+# modo de fusion -> numero de la linea "obj" (rex::ui::ImmediateBlend)
+BLEND_ID = {"normal": 0, "add": 1, "multiply": 2, "screen": 3, "darken": 4, "lighten": 5}
+
+
+def live_fx(st) -> str:
+    """'' si no hay efectos; si no: glow r g b alpha blur chroma brillo saturacion invertir tono grano parpadeo temblor"""
+    vals = {k: st.get(k, d) if st.get(k) is not None else d for k, d in LIVE}
+    if all(vals[k] == d for k, d in LIVE):
+        return ""
+    c = [max(0.0, min(255.0, float(v))) / 255 for v in (list(vals["e_glowc"]) + [255, 255, 255])[:3]]
+    nums = [vals["e_glow"], *c, vals["e_glowa"], vals["e_blur"], vals["e_chroma"], vals["e_bright"], vals["e_sat"], vals["e_inv"], vals["e_hue"],
+            vals["e_grain"], vals["e_flicker"], vals["e_shake"]]
+    return " " + " ".join(f"{float(v):.3f}" for v in nums)
+
+
 
 def safe(n: str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", (n or "").lower()).strip("_")[:32] or "pantalla"
@@ -160,6 +213,77 @@ class _Screen:
             out = sorted(out, key=lambda l: -depth(l))     # sorted es estable: a igual profundidad, el orden de capas
         return out
 
+    # ---- listas con desplazamiento (misma cuenta que web/src/uiedit/lists.js)
+    def descendants(self, lid):
+        out = {lid}
+        grow = True
+        while grow:
+            grow = False
+            for l in self.layers:
+                if l.get("parent") and l["parent"] in out and l["id"] not in out:
+                    out.add(l["id"])
+                    grow = True
+        return out
+
+    def box(self, l):
+        """caja en el diseno (px del editor, sin giro) de una capa o grupo"""
+        if l.get("type") == "group":
+            ids = self.descendants(l["id"])
+            leaves = [q for q in self.layers if q["id"] in ids and q.get("type") not in ("group", "camera") and q.get("visible", True)]
+        else:
+            leaves = [l]
+        x0 = y0 = float("inf")
+        x1 = y1 = float("-inf")
+        for q in leaves:
+            st, x, y, _d, _a = self.world2d(q, "base", 0)
+            k = float(st.get("scale", 1))
+            bw, bh = float(st["w"]) * k, float(st["h"]) * k
+            lx, ly = x - float(st.get("ax", 0.5)) * bw, y - float(st.get("ay", 0.5)) * bh
+            x0, y0, x1, y1 = min(x0, lx), min(y0, ly), max(x1, lx + bw), max(y1, ly + bh)
+        if x0 == float("inf"):
+            _s, x, y, _d, _a = self.world2d(l, "base", 0)
+            return x, y, x, y
+        return x0, y0, x1, y1
+
+    def lists(self, F):
+        """[{id, ax, view, loop, center, fade, clip, wheel, n, step, box, items: [(ids, focus)], start}]"""
+        out = []
+        for g in self.layers:
+            cfg = {**LIST_DEFAULT, **(g.get("list") or {})}
+            if g.get("type") != "group" or not cfg["on"] or not g.get("visible", True):
+                continue
+            ax = 0 if cfg["axis"] == "x" else 1
+            kids = []
+            for q in self.children(g["id"]):
+                if not q.get("visible", True) or q.get("type") == "camera":
+                    continue
+                b = self.box(q)
+                kids.append((q, b, (b[1] + b[3]) / 2 if ax else (b[0] + b[2]) / 2))
+            kids.sort(key=lambda k: k[2])
+            if not kids:
+                continue
+            step = float(cfg.get("step") or 0)
+            if step <= 0:
+                d = sorted(v for v in (kids[i + 1][2] - kids[i][2] for i in range(len(kids) - 1)) if v > 0.5)
+                b0 = kids[0][1]
+                step = d[len(d) // 2] if d else ((b0[3] - b0[1]) if ax else (b0[2] - b0[0])) or 40
+            view = max(1, min(len(kids), int(round(float(cfg.get("view") or 1)))))
+            items = []
+            for q, _b, _c in kids:
+                ids = self.descendants(q["id"])
+                items.append((ids, next((i for i, f in enumerate(F) if f["id"] in ids), -1)))
+            c0 = min(k[1][0 if ax else 1] for k in kids)
+            c1 = max(k[1][2 if ax else 3] for k in kids)
+            a0, a1 = kids[0][2] - step / 2, kids[0][2] + (view - 0.5) * step
+            box = (c0, a0, c1, a1) if ax else (a0, c0, a1, c1)
+            L = {"id": g["id"], "ax": ax, "view": view, "loop": bool(cfg["loop"]), "center": bool(cfg["center"]),
+                 "fade": bool(cfg["fade"]), "clip": bool(cfg["clip"]), "wheel": bool(cfg["wheel"]), "n": len(items),
+                 "step": step, "box": box, "items": items}
+            si = next((i for i, (_ids, f) in enumerate(items) if f >= 0 and F[f]["id"] == self.p.get("focusStart")), -1)
+            L["start"] = list_target(L, 0.0, si) if si >= 0 else 0.0
+            out.append(L)
+        return out
+
     # ---- botones
     def focusables(self):
         F = [l for l in self.layers if (l.get("ui") or {}).get("focus") and l.get("type") in VISUAL]
@@ -193,8 +317,28 @@ class _Screen:
                 up = (i - 1) % n
             if down < 0 and n > 1:
                 down = (i + 1) % n
-            out.append((up, down, pick(i, -1, 0), pick(i, 1, 0)))
-        return out
+            out.append([up, down, pick(i, -1, 0), pick(i, 1, 0)])
+        # dentro de una lista: anterior / siguiente en su eje (con vuelta si es infinita)
+        for L in self.lists(F):
+            wf = [f for _ids, f in L["items"] if f >= 0]
+            m = len(wf)
+            # de lado no se salta a otro elemento de la misma lista (podria estar oculto)
+            c, d = (2, 3) if L["ax"] else (0, 1)
+            for f in wf:
+                for k in (c, d):
+                    if out[f][k] in wf:
+                        out[f][k] = -1
+            if m < 2:
+                continue
+            for j, f in enumerate(wf):
+                prev = wf[j - 1] if j > 0 else (wf[-1] if L["loop"] else -1)
+                nxt = wf[j + 1] if j < m - 1 else (wf[0] if L["loop"] else -1)
+                a, b = (0, 1) if L["ax"] else (2, 3)
+                if prev >= 0:
+                    out[f][a] = prev
+                if nxt >= 0:
+                    out[f][b] = nxt
+        return [tuple(o) for o in out]
 
 
 def project25(cam, x, y, depth):
@@ -346,14 +490,16 @@ class SceneBuilder:
                 pads[l["id"]] = pad
                 gidx[l["id"]] = obj_i
                 order = float(sc.base(l).get("order", 0)) if self.mode == "3d" else rank
-                lines.append(f"obj {obj_i} {ti} {order:g}")
+                lines.append(f"obj {obj_i} {ti} {order:g} {BLEND_ID.get(l.get('blend') or 'normal', 0)}")
                 # para la logica (wui): tipo, posicion y tamano de diseno (px del editor) y nombre de la capa
                 b = sc.base(l)
                 bx, by = (float(b.get("x", W / 2)), float(b.get("y", H / 2))) if self.mode != "3d" else (W / 2, H / 2)
                 name = " ".join(str(l.get("name") or l["id"]).split())
                 lines.append(f"objinfo {obj_i} {l.get('type', 'shape')} {bx:g} {by:g} {float(b.get('w', 0)):g} "
                              f"{float(b.get('h', 0)):g} {name}")
-                cond = l.get("showIf") or {}
+                cond = dict(l.get("showIf") or {})
+                if not cond.get("global") and str(cond.get("src") or "").startswith("$"):
+                    cond["global"] = cond["src"][1:]
                 show_on = fidx.get(l.get("showOnFocus") or "", -1)
                 if l["id"] in fidx or show_on >= 0 or cond.get("global"):
                     g = safe(cond.get("global") or "") if cond.get("global") else "-"
@@ -370,7 +516,19 @@ class SceneBuilder:
                 lines.append(f"focus {i} {gidx[l['id']]} {nb[0]} {nb[1]} {nb[2]} {nb[3]} {1 if ui.get('sound', True) else 0} "
                              f"{float(hv['scale']):.3f} {col[0]:.3f} {col[1]:.3f} {col[2]:.3f} {float(hv['alpha']):.3f} "
                              f"{float(hv['dx']):.1f} {float(hv['dy']):.1f}")
-                lines.append(f"act {i} " + self._action(l, ui.get("action") or {}))
+                lines.append(f"act {i} " + self._action(l, action_of(ui)))
+            # listas con desplazamiento
+            if self.mode != "3d":
+                for li, L in enumerate(sc.lists(F)):
+                    b = L["box"]
+                    lines.append(f"list {li} {L['ax']} {L['step']:.2f} {L['view']} {int(L['loop'])} {int(L['center'])} "
+                                 f"{int(L['fade'])} {int(L['clip'])} {int(L['wheel'])} {L['n']} {b[0]:.1f} {b[1]:.1f} "
+                                 f"{b[2]:.1f} {b[3]:.1f} {L['start']:.3f}")
+                    for idx, (ids, f) in enumerate(L["items"]):
+                        lines.append(f"litem {li} {idx} {f}")
+                        for lid in sorted(ids):
+                            if lid in gidx:
+                                lines.append(f"lobj {gidx[lid]} {li} {idx}")
             # clips
             for clip in CLIPS:
                 dur = sc.duration(clip)
@@ -391,7 +549,7 @@ class SceneBuilder:
                             continue
                         col = [max(0.0, min(255.0, float(c))) / 255 for c in (list(color) + [255, 255, 255])[:3]]
                         lines.append(f"o {gidx[l['id']]} " + " ".join(f"{c:.3f}" for c in (*col, max(0.0, min(1.0, alpha)))) + " " +
-                                     " ".join(f"{v:.2f}" for p in pts for v in p))
+                                     " ".join(f"{v:.2f}" for p in pts for v in p) + live_fx(sc.state(l, clip, t)))
             if self.mode == "3d" and not any(l.get("type") == "camera" for l in sc.layers):
                 self.warnings.append(f"pantalla '{scr.get('name')}': sin camara (se usa la de por defecto)")
             out_screens.append(lines)
@@ -425,6 +583,19 @@ class SceneBuilder:
 
 
 # ================================================================== scripts QB
+OWN_VAR = re.compile(r"^re_ui_[a-z0-9_]+$", re.I)
+
+
+def own_vars(proj: dict) -> list[tuple[str, int]]:
+    """[(variable, valor inicial)] de las condiciones con variables propias de la interfaz (re_ui_...)"""
+    found = {}
+    for s in proj.get("screens") or []:
+        for l in s.get("layers") or []:
+            c = l.get("showIf") or {}
+            v = c.get("global") or (str(c.get("src") or "")[1:] if str(c.get("src") or "").startswith("$") else "")
+            if v and OWN_VAR.match(v):
+                found.setdefault(v, int((proj.get("designVars") or {}).get(v) or 0))
+    return sorted(found.items())
 def qscripts(n: str, proj: dict) -> str:
     """Scripts QB de la interfaz: ordenes para re-wor (globales) y, si tiene botones, captura del mando."""
     screens = proj.get("screens") or []
@@ -440,6 +611,9 @@ def qscripts(n: str, proj: dict) -> str:
            f"// Mando: {g}_key = 1 arriba, 2 abajo, 3 izquierda, 4 derecha, 5 elegir, 6 atras; {g}_kseq sube en cada tecla.",
            f"int re_ui_{n}_active = 0"]
     out += [f"int {g}_{k} = 0" for k in ("cmd", "seq", "arg", "key", "kseq")]
+    # variables propias de la interfaz (condiciones "mostrar segun una variable" que empiezan por re_ui_): las crea
+    # la interfaz con su valor de diseno; asi la logica (game.set) puede cambiarlas y re-wor leerlas
+    out += [f"int {v} = {d}" for v, d in own_vars(proj)]
     out.append("")
     out += [f"script re_ui_{n}_show parent = root_window", *signal(1), f"    Change re_ui_{n}_active = 1"]
     if interactive:

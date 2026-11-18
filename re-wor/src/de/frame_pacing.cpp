@@ -8,6 +8,9 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "generated/re_wor_pch.h"   // REX_LOAD_U32
 
@@ -95,8 +98,14 @@ void BeforeEngineFrame() {
   auto now = Clock::now();
   if (s_next > now) {
     const auto left = s_next - now;
-    if (left > std::chrono::microseconds(2000)) std::this_thread::sleep_for(left - std::chrono::microseconds(1500));
-    while (Clock::now() < s_next) std::this_thread::yield();
+    if (left > std::chrono::microseconds(1500)) std::this_thread::sleep_for(left - std::chrono::microseconds(1000));
+    while (Clock::now() < s_next) {
+#ifdef _WIN32
+      YieldProcessor();
+#else
+      std::this_thread::yield();
+#endif
+    }
     now = Clock::now();
   }
   s_next = (now - s_next > period) ? now + period : s_next + period;   // si va atrasado no acumula deuda

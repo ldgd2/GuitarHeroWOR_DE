@@ -8,6 +8,8 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <numeric>
+#include <vector>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -1154,26 +1156,126 @@ void DePanelDialog::DrawGraphicsTab() {
       changed = true;
     }
     Hint("Cambia antialiasing, filtrado, post-proceso y cache de texturas. No toca la resolucion.");
-    const char* apis[] = {"Direct3D 12", "Vulkan"};
-    int aidx = g.backend == "vulkan" ? 1 : 0;
+    const char* apis[] = {"Direct3D 12", "Vulkan", "Direct3D 11 (Legacy / APU)"};
+    int aidx = g.backend == "vulkan" ? 1 : g.backend == "d3d11" ? 2 : 0;
     Row("API grafica");
-    if (ImGui::Combo("##api", &aidx, apis, 2)) { g.backend = aidx ? "vulkan" : "d3d12"; changed = true; }
+    if (ImGui::Combo("##api", &aidx, apis, 3)) {
+      g.backend = aidx == 1 ? "vulkan" : aidx == 2 ? "d3d11" : "d3d12";
+      changed = true;
+    }
     RestartTag(g.backend != b.backend);
-    Hint("Si Vulkan no arranca en esta tarjeta, el juego vuelve solo a Direct3D 12. Los efectos de imagen "
-         "(bloom, glow...) solo funcionan con Direct3D 12.");
+    Hint("Direct3D 11 es el motor nativo completo y optimizado (Fase 4). Direct3D 12 y Vulkan estan en desarrollo.");
+
+    const char* pipelines[] = {"Nativo Completo (Fase 4: 100% Nativo PC)", "Hibrido (Fase 3: Escenario 3D)", "Emulador Xenos (Clasico)"};
+    int pidx = g.pipeline_mode == "hybrid" ? 1 : g.pipeline_mode == "emulated" ? 2 : 0;
+    Row("Pipeline de Render");
+    if (ImGui::Combo("##pipelinemode", &pidx, pipelines, 3)) {
+      g.pipeline_mode = pidx == 1 ? "hybrid" : pidx == 2 ? "emulated" : "full";
+      changed = true;
+    }
+    RestartTag(g.pipeline_mode != b.pipeline_mode);
+    Hint("El modo Nativo Completo (Fase 4) elimina la emulacion de EDRAM y traslada el 100% del render a la GPU.");
   }
 
   // ---------------------------------------------------------------- Pantalla
   Section("Pantalla");
   {
-    const char* labels[] = {"La de la ventana / escritorio", "1280 x 720 (720p)", "1920 x 1080 (1080p)",
-                            "2560 x 1440 (1440p)", "3840 x 2160 (4K)"};
-    const char* vals[] = {"", "720p", "1080p", "1440p", "4k"};
+    struct DisplayResItem {
+      std::string val;
+      std::string label;
+    };
+
+    static std::vector<DisplayResItem> s_res_cached;
+    if (s_res_cached.empty()) {
+      s_res_cached.push_back({"", "Nativa de la pantalla / escritorio (Auto)"});
+      std::vector<std::pair<uint32_t, uint32_t>> res_pairs;
+#ifdef _WIN32
+      DEVMODEA dm = {};
+      dm.dmSize = sizeof(dm);
+
+      for (DWORD i = 0; EnumDisplaySettingsA(nullptr, i, &dm); ++i) {
+        if (dm.dmBitsPerPel != 32) continue;
+        if (dm.dmPelsWidth < 800 || dm.dmPelsHeight < 600) continue;
+
+        bool exists = false;
+        for (const auto& p : res_pairs) {
+          if (p.first == dm.dmPelsWidth && p.second == dm.dmPelsHeight) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists) {
+          res_pairs.push_back({dm.dmPelsWidth, dm.dmPelsHeight});
+        }
+      }
+
+      std::sort(res_pairs.begin(), res_pairs.end(), [](const auto& a, const auto& b) {
+        if (a.first != b.first) return a.first < b.first;
+        return a.second < b.second;
+      });
+#endif
+      if (res_pairs.empty()) {
+        res_pairs = {
+            {1280, 720}, {1366, 768}, {1600, 900}, {1920, 1080},
+            {1920, 1200}, {2560, 1080}, {2560, 1440}, {2560, 1600},
+            {3440, 1440}, {3840, 2160}
+        };
+      }
+
+      for (const auto& [w, h] : res_pairs) {
+        uint32_t gcd_val = std::gcd(w, h);
+        uint32_t rw = w / (gcd_val ? gcd_val : 1);
+        uint32_t rh = h / (gcd_val ? gcd_val : 1);
+        if (rw == 8 && rh == 5) { rw = 16; rh = 10; }
+        else if (rw == 64 && rh == 27) { rw = 21; rh = 9; }
+        else if (rw == 43 && rh == 18) { rw = 21; rh = 9; }
+
+        char val_buf[32];
+        std::snprintf(val_buf, sizeof(val_buf), "%ux%u", w, h);
+
+        char label_buf[96];
+        const char* standard_tag = "";
+        if (w == 1280 && h == 720) standard_tag = " - 720p HD";
+        else if (w == 1366 && h == 768) standard_tag = " - Portatiles";
+        else if (w == 1600 && h == 900) standard_tag = " - 900p HD+";
+        else if (w == 1920 && h == 1080) standard_tag = " - 1080p Full HD";
+        else if (w == 1920 && h == 1200) standard_tag = " - 1200p (16:10)";
+        else if (w == 2560 && h == 1440) standard_tag = " - 1440p 2K QHD";
+        else if (w == 2560 && h == 1600) standard_tag = " - 1600p (16:10)";
+        else if (w == 3440 && h == 1440) standard_tag = " - Ultrawide UWQHD";
+        else if (w == 3840 && h == 2160) standard_tag = " - 4K Ultra HD";
+
+        std::snprintf(label_buf, sizeof(label_buf), "%u x %u (%u:%u%s)", w, h, rw, rh, standard_tag);
+        s_res_cached.push_back({val_buf, label_buf});
+      }
+    }
+
     int idx = 0;
-    for (int i = 0; i < 5; ++i) if (g.resolution == vals[i]) idx = i;
+    for (size_t i = 0; i < s_res_cached.size(); ++i) {
+      if (g.resolution == s_res_cached[i].val ||
+          (g.resolution == "1080p" && s_res_cached[i].val == "1920x1080") ||
+          (g.resolution == "720p" && s_res_cached[i].val == "1280x720") ||
+          (g.resolution == "1440p" && s_res_cached[i].val == "2560x1440") ||
+          (g.resolution == "4k" && s_res_cached[i].val == "3840x2160") ||
+          (g.resolution == "900p" && s_res_cached[i].val == "1600x900") ||
+          (g.resolution == "768p" && s_res_cached[i].val == "1366x768")) {
+        idx = static_cast<int>(i);
+        break;
+      }
+    }
+
     Row("Resolucion");
-    // al momento, con 10 s para confirmar (el .toml cambia al confirmar)
-    if (ImGui::Combo("##res", &idx, labels, 5)) RequestDisplayChange(g.resolution, g.window_mode, vals[idx], g.window_mode);
+    if (ImGui::BeginCombo("##res", s_res_cached[idx].label.c_str())) {
+      for (size_t i = 0; i < s_res_cached.size(); ++i) {
+        bool is_selected = (idx == static_cast<int>(i));
+        if (ImGui::Selectable(s_res_cached[i].label.c_str(), is_selected)) {
+          RequestDisplayChange(g.resolution, g.window_mode, s_res_cached[i].val, g.window_mode);
+        }
+        if (is_selected) ImGui::SetItemDefaultFocus();
+      }
+      ImGui::EndCombo();
+    }
+    Hint("Detecta automaticamente todas las resoluciones y proporciones (16:9, 16:10, 21:9) de tu monitor o pantalla.");
   }
   {
     const char* labels[] = {"Ventana", "Pantalla completa (sin bordes)", "Pantalla completa exclusiva"};
@@ -1219,14 +1321,17 @@ void DePanelDialog::DrawGraphicsTab() {
   // ---------------------------------------------------------------- Calidad
   Section("Calidad");
   {
-    const char* labels[] = {"1x  (1280 x 720, como la consola)", "2x  (2560 x 1440)", "3x  (3840 x 2160)",
-                            "4x  (5120 x 2880)"};
+    const char* labels[] = {
+        "1.0x (Nativa 1:1 - Recomendada / Portatil fresca y rapida)",
+        "2.0x (Supersampling 2x - Alta definicion / Mas calor en GPU)",
+        "3.0x (Supersampling 3x - Ultra definicion / Mucho calor)",
+        "4.0x (Supersampling 4x - Solo PCs de gama extrema)"
+    };
     int idx = std::clamp(g.resolution_scale, 1, 4) - 1;
-    Row("Resolucion de render");
+    Row("Escala de render");
     if (ImGui::Combo("##scale", &idx, labels, 4)) { g.resolution_scale = idx + 1; changed = true; }
     RestartTag(g.resolution_scale != b.resolution_scale);
-    Hint("El juego dibuja internamente a este tamano y luego se ajusta a la pantalla. 2x se ve mucho mas "
-         "nitido; 3x y 4x piden una GPU potente.");
+    Hint("En Fase 4 nativa, el juego ya se dibuja en 1080p nativo si elegiste 1080p en la seccion Pantalla. 1.0x es la opcion optima y fresca para portatiles; 2.0x realiza supersampling interno.");
   }
   Row("Antialiasing");
   if (ImGui::Checkbox("MSAA 2x nativo##msaa", &g.msaa2x)) changed = true;

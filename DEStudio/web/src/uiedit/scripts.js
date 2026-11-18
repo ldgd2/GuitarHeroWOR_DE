@@ -4,6 +4,7 @@
 //   capa      layer.script.source      lo de esa capa (si no tiene, su codigo es el que sale de su panel)
 // Al compilar se juntan en un solo programa de wui (assemble); los errores vuelven a su parte (locate).
 // Misma forma de juntar en DEStudio/editor/ui/logic.py (exportar): si cambias algo aqui, cambialo alli.
+import { animSource } from './anims.js';
 import { layerScript } from './blocks.js';
 
 export const screenSafe = n => (n || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'pantalla';
@@ -22,7 +23,8 @@ export function draftOf(proj) {
 
 /** las partes en orden: proyecto, y por pantalla la pantalla y sus capas con codigo propio */
 export function parts(proj, d = draftOf(proj)) {
-  const out = [{ key: 'p', kind: 'project', title: 'Proyecto', src: d.p || '' }];
+  const out = [{ key: 'a', kind: 'anims', title: 'Animaciones', src: animSource(proj).text },
+    { key: 'p', kind: 'project', title: 'Proyecto', src: d.p || '' }];
   for (const s of proj.screens || []) {
     out.push({ key: 's:' + s.id, kind: 'screen', id: s.id, title: s.name, src: d['s:' + s.id] ?? '', own: d['s:' + s.id] != null });
     for (const l of s.layers || []) if (d['l:' + l.id] != null)
@@ -31,7 +33,7 @@ export function parts(proj, d = draftOf(proj)) {
   return out;
 }
 
-const KIND = { project: 'proyecto', screen: 'pantalla', layer: 'capa' };
+const KIND = { anims: 'generado', project: 'proyecto', screen: 'pantalla', layer: 'capa' };
 /** un solo programa: {text, map: [{key, from, to}]} (lineas de 1 en adelante) */
 export function assemble(ps) {
   const lines = [], map = [];

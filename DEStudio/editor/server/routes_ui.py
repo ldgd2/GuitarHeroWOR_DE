@@ -188,7 +188,22 @@ def import_layered(req):
     stem = re.sub(r"[^a-z0-9_]+", "_", fn.rsplit(".", 1)[0].lower()).strip("_")[:24] or "diseno"
     work = _work(b.get("pid"))
     out = []
+    fonts = {}
     for i, L in enumerate(doc["layers"]):
+        if L.get("kind") == "text":          # texto editable: su fuente se copia al proyecto (si esta instalada)
+            ps = L.get("font_ps") or ""
+            if ps not in fonts:
+                src = layered.find_font(ps)
+                fonts[ps] = None
+                if src:
+                    dst = work / (re.sub(r"[^A-Za-z0-9_-]+", "_", src.stem) + src.suffix.lower())
+                    if not dst.exists():
+                        dst.write_bytes(src.read_bytes())
+                    fonts[ps] = {"family": dst.stem, "file": dst.name}
+                else:
+                    doc.setdefault("warnings", []).append(f"no encuentro la fuente '{ps}' instalada: el texto usa otra")
+            out.append({**L, "font": fonts[ps]})
+            continue
         nm = re.sub(r"[^a-z0-9_]+", "_", L["name"].lower()).strip("_")[:24] or "capa"
         f = work / f"{stem}__{i:02d}_{nm}.png"
         f.write_bytes(L["png"])

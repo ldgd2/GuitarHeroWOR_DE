@@ -115,7 +115,8 @@ struct PerfConfig {
 
 // Configuracion grafica y traduccion (seccion [graphics]).
 struct GraphicsConfig {
-  std::string backend = "d3d12";            // API grafica: "d3d12" o "vulkan" (si Vulkan falla, vuelve a D3D12)
+  std::string backend = "d3d12";            // API grafica: "d3d12", "vulkan" o "d3d11" (D3D11 para PCs antiguas / APUs)
+  std::string pipeline_mode = "full";       // "full" (Fase 4: 100% nativo sin EDRAM), "hybrid" (Fase 3), "emulated"
   std::string render_target_path = "rtv";   // "rtv" (Hardware ROP - rapido para Nvidia/AMD/Intel y patatas), "rov"
   int resolution_scale = 1;                 // 1 = 720p (ligero/patatas), 2 = 1440p/4K (high-end)
   int texture_cache_mb = 1024;              // limite de textura (MB) para evitar tirones

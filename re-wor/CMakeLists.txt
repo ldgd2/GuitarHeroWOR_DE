@@ -73,7 +73,32 @@ set(REWOR_SOURCES
     src/de/native_fx.cpp
     src/de/render_sandbox.cpp
     src/de/cam_watch.cpp
+    src/de/devmap_probe.cpp
+    src/de/d3d_tap.cpp
+    src/de/framecap.cpp
     src/de/mod_manager.cpp
+    # Native Graphics Architecture (Fase 2: Device Map & State Extractor)
+    src/nativegfx/state/texture_desc.cpp
+    src/nativegfx/device/device_reader.cpp
+    src/nativegfx/device/device_tracker.cpp
+    # Native Graphics Architecture (Fase 3: Native Backend & Hybrid Pipeline)
+    src/nativegfx/backend/backend_factory.cpp
+    src/nativegfx/backend/d3d11/d3d11_device.cpp
+    src/nativegfx/backend/d3d11/d3d11_state_cache.cpp
+    src/nativegfx/backend/d3d11/d3d11_shader_cache.cpp
+    src/nativegfx/backend/d3d11/d3d11_texture_cache.cpp
+    src/nativegfx/backend/d3d11/d3d11_renderer.cpp
+    src/nativegfx/backend/d3d12/d3d12_device.cpp
+    src/nativegfx/backend/d3d12/d3d12_renderer.cpp
+    src/nativegfx/backend/vulkan/vulkan_device.cpp
+    src/nativegfx/backend/vulkan/vulkan_renderer.cpp
+    src/nativegfx/hybrid/scene_classifier.cpp
+    src/nativegfx/hybrid/hybrid_pipeline.cpp
+    # Native Graphics Architecture (Fase 4: Full Native Pipeline, Zero EDRAM & GPU Decoupler)
+    src/nativegfx/full/surface_manager.cpp
+    src/nativegfx/full/vblank_generator.cpp
+    src/nativegfx/full/gpu_decoupler.cpp
+    src/nativegfx/full/full_pipeline.cpp
     src/memory/memory_heaps.cpp
     src/integrations/discord/discord_rpc.cpp
     src/diagnostics/stubs.cpp
@@ -123,6 +148,7 @@ target_include_directories(re_wor PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
+    ${REXSDK_DIR}/thirdparty/vulkan-headers/include
 )
 
 target_link_libraries(re_wor PRIVATE
@@ -134,7 +160,7 @@ target_link_libraries(re_wor PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(re_wor PRIVATE winmm)
+    target_link_libraries(re_wor PRIVATE winmm d3d11 d3d12 dxgi d3dcompiler dxguid)
 endif()
 
 if(REWOR_ENABLE_DISCORD_RPC)
@@ -155,10 +181,14 @@ endif()
 set_target_properties(re_wor PROPERTIES OUTPUT_NAME "Guitar Hero Warriors of Rock")
 
 # SEH (__try/__except) crash protection for ctor iteration
-# clang++ on Windows supports this natively via -fms-extensions (default)
+# clang++ on Windows needs -fasync-exceptions to handle hardware faults in __except
 # MSVC needs /EHa explicitly
-if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(re_wor PRIVATE /EHa)
+if(MSVC)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(re_wor PRIVATE -fasync-exceptions)
+    else()
+        target_compile_options(re_wor PRIVATE /EHa)
+    endif()
 endif()
 
 # Codegen target - run 'cmake --build . --target re_wor_codegen'
@@ -206,4 +236,72 @@ if(Python3_Interpreter_FOUND AND REWOR_QB_SOURCES)
     add_dependencies(re_wor re_wor_qb)
 elseif(REWOR_QB_SOURCES)
     message(WARNING "No se encontro Python 3: los scripts de qb/ (menu Options > Graphics) no se compilaran")
+endif()
+
+# Herramienta fuera de linea del render nativo (docs/RENDER_NATIVO.md, fase 1): traduce los shaders de la 360
+# capturados (cache/shaders/shareable/*.xsh) a HLSL. No forma parte del juego: cmake --build . --target xenos2hlsl
+set(XENOS2HLSL_SDK_SOURCES
+    ${REXSDK_DIR}/src/graphics/pipeline/shader/shader.cpp
+    ${REXSDK_DIR}/src/graphics/format/ucode.cpp
+    ${REXSDK_DIR}/src/graphics/pipeline/shader/translator.cpp
+    ${REXSDK_DIR}/src/graphics/pipeline/shader/translator_disasm.cpp)
+add_executable(xenos2hlsl EXCLUDE_FROM_ALL
+    tools/xenos2hlsl/main.cpp
+    tools/xenos2hlsl/hlsl_translator.cpp
+    ${XENOS2HLSL_SDK_SOURCES})
+target_include_directories(xenos2hlsl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tools/xenos2hlsl)
+target_link_libraries(xenos2hlsl PRIVATE rex::core)
+target_compile_options(xenos2hlsl PRIVATE -Wno-unused-variable)
+
+# Comprobacion del traductor (docs/RENDER_NATIVO.md, fase 1): compara cada shader traducido, ejecutado en D3D11
+# (WARP), contra el interprete de referencia. cmake --build . --target xenos2hlsl_check
+if(WIN32)
+    add_executable(xenos2hlsl_check EXCLUDE_FROM_ALL
+        tools/xenos2hlsl/check.cpp
+        tools/xenos2hlsl/check_vk.cpp
+        tools/xenos2hlsl/hlsl_translator.cpp
+        tools/xenos2hlsl/ref_interpreter.cpp
+        ${REXSDK_DIR}/src/graphics/register_file.cpp
+        ${XENOS2HLSL_SDK_SOURCES})
+    target_include_directories(xenos2hlsl_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tools/xenos2hlsl
+        ${REXSDK_DIR}/thirdparty/vulkan-headers/include)   # Vulkan se carga en tiempo de ejecucion
+    target_link_libraries(xenos2hlsl_check PRIVATE rex::core d3d11 d3dcompiler dxgi)
+    target_compile_options(xenos2hlsl_check PRIVATE -Wno-unused-variable)
+
+    # Reproductor de capturas de frame (docs/RENDER_NATIVO.md, fase 3b): vuelve a dibujar un frame capturado con
+    # src/de/framecap.cpp en D3D11 con los shaders traducidos, a la escala pedida. cmake --build . --target xfcplay
+    add_executable(xfcplay EXCLUDE_FROM_ALL
+        tools/xfcplay/xfcplay.cpp
+        tools/xenos2hlsl/hlsl_translator.cpp
+        ${XENOS2HLSL_SDK_SOURCES})
+    target_include_directories(xfcplay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tools/xenos2hlsl)
+    target_link_libraries(xfcplay PRIVATE rex::core d3d11 d3dcompiler dxgi windowscodecs ole32)
+    target_compile_options(xfcplay PRIVATE -Wno-unused-variable)
+
+    # Test de verificacion de la Fase 2 y 3 del Render Nativo (nativegfx)
+    add_executable(nativegfx_test EXCLUDE_FROM_ALL
+        tools/nativegfx_test/main.cpp
+        src/nativegfx/state/texture_desc.cpp
+        src/nativegfx/device/device_reader.cpp
+        src/nativegfx/device/device_tracker.cpp
+        src/nativegfx/backend/backend_factory.cpp
+        src/nativegfx/backend/d3d11/d3d11_device.cpp
+        src/nativegfx/backend/d3d11/d3d11_state_cache.cpp
+        src/nativegfx/backend/d3d11/d3d11_shader_cache.cpp
+        src/nativegfx/backend/d3d11/d3d11_texture_cache.cpp
+        src/nativegfx/backend/d3d11/d3d11_renderer.cpp
+        src/nativegfx/backend/d3d12/d3d12_device.cpp
+        src/nativegfx/backend/d3d12/d3d12_renderer.cpp
+        src/nativegfx/backend/vulkan/vulkan_device.cpp
+        src/nativegfx/backend/vulkan/vulkan_renderer.cpp
+        src/nativegfx/hybrid/scene_classifier.cpp
+        src/nativegfx/hybrid/hybrid_pipeline.cpp
+        src/nativegfx/full/surface_manager.cpp
+        src/nativegfx/full/vblank_generator.cpp
+        src/nativegfx/full/gpu_decoupler.cpp
+        src/nativegfx/full/full_pipeline.cpp)
+    target_include_directories(nativegfx_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${REXSDK_DIR}/thirdparty/vulkan-headers/include)
+    target_link_libraries(nativegfx_test PRIVATE rex::core d3d11 d3d12 dxgi d3dcompiler dxguid)
 endif()

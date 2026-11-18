@@ -277,7 +277,9 @@ void Load() {
       g.aniso = std::clamp(static_cast<int>((*gfx)["aniso"].value_or(g.aniso)), 0, 4);
       g.post_fx = (*gfx)["post_fx"].value_or(g.post_fx);
       g.perf_detail = (*gfx)["perf_detail"].value_or(g.perf_detail);
-      if (g.backend != "vulkan") g.backend = "d3d12";
+      if (g.backend != "vulkan" && g.backend != "d3d11") g.backend = "d3d12";
+      g.pipeline_mode = (*gfx)["pipeline_mode"].value_or(g.pipeline_mode);
+      if (g.pipeline_mode != "hybrid" && g.pipeline_mode != "emulated") g.pipeline_mode = "full";
       // preset guardado; si falta (configuracion vieja) se deduce de los valores
       g.preset = (*gfx)["preset"] ? std::clamp(static_cast<int>((*gfx)["preset"].value_or(4)), 0, 4) : g.MatchPreset();
       if (g.preset < 4 && g.MatchPreset() != g.preset) g.preset = 4;
@@ -369,6 +371,7 @@ bool Save() {
                     {"above_normal_priority", c.perf.above_normal_priority}};
 
   toml::table gfx{{"backend", c.graphics.backend},
+                  {"pipeline_mode", c.graphics.pipeline_mode},
                   {"render_target_path", c.graphics.render_target_path},
                   {"resolution_scale", c.graphics.resolution_scale},
                   {"texture_cache_mb", c.graphics.texture_cache_mb},

@@ -4,6 +4,7 @@
 //   Capas      un script por capa: sin editar es el que sale de su panel; al editarlo pasa a ser codigo propio
 // Pestanas: Codigo (editor con errores al momento), Reglas (bloques "Cuando ... hacer ..." en el script del
 // proyecto) y Referencia (funciones, metodos, propiedades y eventos con ejemplos).
+import { restorePanel } from './model.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../ui/icons.jsx';
 import { Num } from '../studio/fields.jsx';
@@ -21,11 +22,11 @@ export function applyDraft(p, d, rules) {
       const k = 'l:' + l.id;
       if (d[k] != null) {
         if (!l.script) {
-          l.script = { source: d[k], panel: l.ui ? { action: structuredClone(l.ui.action || {}), hover: structuredClone(l.ui.hover || {}) } : null };
+          l.script = { source: d[k], panel: l.ui ? { actions: structuredClone(l.ui.actions || []), hover: structuredClone(l.ui.hover || {}) } : null };
           neutralizePanel(l);
         } else l.script.source = d[k];
       } else if (l.script) {
-        if (l.script.panel && l.ui) { l.ui.action = l.script.panel.action; l.ui.hover = l.script.panel.hover; }
+        restorePanel(l);
         delete l.script;
       }
     }

@@ -11,16 +11,17 @@ import { LayerCanvas, cachedRaster, useRasterVersion } from '../studio/LayerCanv
 import { SYSTEM_FONTS } from '../studio/raster.js';
 import { ACCEPT, FontPicker, uploadFiles } from './resources.jsx';
 import { ImageEditor } from './ImageEditor.jsx';
+import { ListProps } from './ListProps.jsx';
+import { SelFx } from './SelFx.jsx';
 import {
   ACTIONS, CAM25, SCRIPT_PRESETS, SHAPES, SHAPE_ICON, TYPES, TYPE_ICON, ancestors, cam25At, childrenOf, clean, clipOf, descendants,
-  fmt, focusables, keyAtClip, propsFor, removeKey, setProp, stateAt,
-} from './model.js';
+  fmt, focusables, keyAtClip, ownVar, propsFor, removeKey, setProp, stateAt, LIVE_PROPS, LIVE_DEFAULTS, COLOR_PROPS, BLEND_MODES, newAction, actionOf } from './model.js';
 import { assetUrl, fitText, layerUrl, layout } from './view2d.js';
 
 const WEIGHTS = [[300, 'Fina'], [400, 'Normal'], [500, 'Media'], [600, 'Seminegrita'], [700, 'Negrita'], [800, 'Extra'], [900, 'Black']];
 export const fontList = proj => [...(proj.fonts || []).map(f => f.family), ...SYSTEM_FONTS];
 
-function Section({ title, icon, children, open: open0 = true, right }) {
+export function Section({ title, icon, children, open: open0 = true, right }) {
   const [open, setOpen] = useState(open0);
   useEffect(() => { if (open0) setOpen(true); }, [open0]);   // se abre sola cuando pasa a tener algo (p. ej. al hacerla boton)
   return (
@@ -33,15 +34,16 @@ function Section({ title, icon, children, open: open0 = true, right }) {
     </div>
   );
 }
-const Row = ({ label, children, title }) => <label className="ue-row" title={title}><span>{label}</span><div>{children}</div></label>;
+export const Row = ({ label, children, title }) => <label className="ue-row" title={title}><span>{label}</span><div>{children}</div></label>;
 const Toggle = ({ on, onChange, children, title }) =>
   <button className={'ue-tog' + (on ? ' on' : '')} onClick={() => onChange(!on)} title={title}>{children}</button>;
-const Check = ({ v, onChange, label }) =>
+export const Check = ({ v, onChange, label }) =>
   <label className="ue-check"><input type="checkbox" checked={!!v} onChange={e => onChange(e.target.checked)} />{label}</label>;
 
 // ===================================================================== propiedades
 export function PropsPanel({ proj, doc, mode, sel, clip, t, edit, editProj, selKey, setSelKey, selCut, setSelCut, setSid, setTool, onScript, onDropScript, onImport }) {
   const c = clipOf(doc, clip);
+  const [imgEd, setImgEd] = useState(null);
   if (selCut != null && c?.cuts?.[selCut]) {
     const cut = c.cuts[selCut];
     return (
@@ -82,8 +84,8 @@ export function PropsPanel({ proj, doc, mode, sel, clip, t, edit, editProj, selK
         <KeyToggle state={on ? 'on' : has ? 'has' : ''} disabled={clip === 'base'} onClick={() => toggleKey(p)}
           title={clip === 'base' ? 'Elige Entrada, Bucle o Salida para animar' : on ? 'Quitar la clave' : 'Poner una clave aqui'} />
         <span>{label}</span>
-        {p === 'color' ? <Color v={s.color} onChange={v => set('color', v)} />
-          : <Num v={p === 'alpha' ? s[p] : s[p]} step={step} min={min} max={max} onChange={v => set(p, v)} />}
+        {COLOR_PROPS.has(p) ? <Color v={s[p] ?? LIVE_DEFAULTS[p]} onChange={v => set(p, v)} />
+          : <Num v={s[p] ?? LIVE_DEFAULTS[p] ?? 0} step={step} min={min} max={max} onChange={v => set(p, v)} />}
       </div>);
   };
   return (
@@ -109,6 +111,14 @@ export function PropsPanel({ proj, doc, mode, sel, clip, t, edit, editProj, selK
           <Icon n="cam" />{doc.activeCam === layer.id ? 'Es la camara inicial' : 'Usar como camara inicial'}</button>}
         {mode === '3d' && !isCam25 && layer.type !== 'camera' && <Row label="Orden de dibujo"><Num v={layer.base.order} onChange={v => setL(L => { L.base.order = v; })} /></Row>}
       </Section>
+      {!isCam25 && ['image', 'text', 'shape'].includes(layer.type) && <Section title={clip === 'base' ? 'Efectos en vivo' : `Efectos en vivo (claves en ${fmt(t)} s)`} icon="fx"
+        open={(layer.blend && layer.blend !== 'normal') || LIVE_PROPS.some(([k]) => JSON.stringify(s[k] ?? LIVE_DEFAULTS[k]) !== JSON.stringify(LIVE_DEFAULTS[k]))}>
+        <div className="st-muted ue-scripthelp">Se dibujan en el juego cada fotograma: se pueden animar con claves y cambiar desde el codigo, sin perder calidad.</div>
+        <Row label="Modo de fusion"><select value={layer.blend || 'normal'} onChange={e => setL(L => { L.blend = e.target.value; })}>
+          {BLEND_MODES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Row>
+        <div className="ue-propgrid">{LIVE_PROPS.map(prop)}</div>
+        <button onClick={() => setL(L => { Object.assign(L.base, JSON.parse(JSON.stringify(LIVE_DEFAULTS))); })}><Icon n="undo" />Quitar los efectos</button>
+      </Section>}
       {key && <Section title={`Clave en ${fmt(selKey.t)} s`} icon="keyframe">
         <Row label="Curva desde la anterior">
           <select value={key.ease || 'linear'} onChange={e => edit(d => { keyAtClip(d.clips[clip], layer.id, selKey.prop, selKey.t).ease = e.target.value; })}>
@@ -118,6 +128,7 @@ export function PropsPanel({ proj, doc, mode, sel, clip, t, edit, editProj, selK
       </Section>}
       {layer.type === 'text' && <TextProps proj={proj} l={layer} setL={setL} />}
       {layer.type === 'shape' && <ShapeProps l={layer} setL={setL} />}
+      {layer.type === 'group' && mode !== '3d' && <ListProps doc={doc} layer={layer} setL={setL} edit={edit} />}
       {layer.type === 'image' && <Section title="Imagen" icon="tex">
         <div className="st-muted">{layer.image?.custom ? `${layer.image.svg ? 'SVG (vectorial, nitido a cualquier tamano)' : 'Imagen propia'}: ${layer.image.file}`
           : layer.image?.key ? `${layer.image.name}  (${layer.image.pak})` : 'Elige una imagen en Recursos'}</div>
@@ -128,7 +139,8 @@ export function PropsPanel({ proj, doc, mode, sel, clip, t, edit, editProj, selK
       {imgEd === layer.id && layer.image?.custom && <ImageEditor proj={proj} layer={layer} close={() => setImgEd(null)}
         onApply={im => setL(L => { const k = L.image.w ? L.base.w / L.image.w : 1; L.image = im; if (im.w) { L.base.w = Math.round(im.w * k); L.base.h = Math.round(im.h * k); } })} />}
       {!isCam25 && ['image', 'text', 'shape'].includes(layer.type) && <FxProps l={layer} setL={setL} />}
-      {!isCam25 && ['image', 'text', 'shape'].includes(layer.type) && <UiProps proj={proj} doc={doc} l={layer} setL={setL} edit={edit} setSid={setSid} />}
+      {!isCam25 && ['image', 'text', 'shape'].includes(layer.type) && <UiProps proj={proj} doc={doc} l={layer} setL={setL} edit={edit} editProj={editProj} setSid={setSid} />}
+      {!isCam25 && ['image', 'text', 'shape'].includes(layer.type) && layer.ui?.focus && mode !== '3d' && <SelFx proj={proj} doc={doc} l={layer} edit={edit} />}
       {!isCam25 && ['image', 'text', 'shape'].includes(layer.type) && onScript && <ScriptProps l={layer} onScript={onScript} onDropScript={onDropScript} />}
     </div>
   );
@@ -295,11 +307,22 @@ function ScriptProps({ l, onScript, onDropScript }) {
     </Section>);
 }
 
-function UiProps({ proj, doc, l, setL, setSid }) {
+function UiProps({ proj, doc, l, setL, editProj, setSid }) {
   const ui = l.ui;
-  const a = ui.action || {};
+  // la accion al pulsar es la primera de ui.actions (formato actual); 'Poner un valor' guarda la variable en target ($nombre)
+  const a0 = ui.actions?.[0];
+  const a = a0 ? { ...a0, global: a0.global ?? (a0.target?.startsWith('$') ? a0.target.slice(1) : '') } : { type: 'none' };
   const F = focusables(doc);
-  const setA = fn => setL(L => { fn(L.ui.action); });
+  const setA = fn => setL(L => {
+    if (!Array.isArray(L.ui.actions)) L.ui.actions = [];
+    if (!L.ui.actions[0]) L.ui.actions[0] = newAction('none');
+    const o = L.ui.actions[0];
+    if (o.global === undefined) o.global = o.target?.startsWith('$') ? o.target.slice(1) : '';
+    fn(o);
+    if (o.global) o.target = '$' + o.global;
+    if (o.type === 'none') L.ui.actions.splice(0, 1);
+  });
+  const showVar = l.showIf ? (l.showIf.global ?? (l.showIf.src?.startsWith('$') ? l.showIf.src.slice(1) : '')) : '';
   return (
     <Section title="Interaccion" icon="gamepad" open={!!ui.focus || !!l.showOnFocus || !!l.showIf}>
       <Check v={ui.focus} label="Es un boton (recibe el foco con el mando o el raton)" onChange={v => setL(L => { L.ui.focus = v; })} />
@@ -337,12 +360,15 @@ function UiProps({ proj, doc, l, setL, setSid }) {
       </>}
       {!ui.focus && <Row label="Visible solo con el foco de"><select value={l.showOnFocus || ''} onChange={e => setL(L => { L.showOnFocus = e.target.value || null; })}>
         <option value="">(siempre visible)</option>{F.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Row>}
-      <Check v={!!l.showIf} label="Mostrar segun una variable del juego" onChange={v => setL(L => { L.showIf = v ? { global: '', op: '=', value: 1 } : null; })} />
+      <Check v={!!l.showIf} label="Mostrar segun una variable del juego" onChange={v => setL(L => { L.showIf = v ? { global: '', src: '', op: '=', value: 1 } : null; })} />
       {l.showIf && <div className="ue-pair3">
-        <input value={l.showIf.global} placeholder="variable" onChange={e => setL(L => { L.showIf.global = clean(e.target.value); })} />
+        <input value={showVar} placeholder="variable" onChange={e => setL(L => { L.showIf.global = clean(e.target.value); L.showIf.src = '$' + L.showIf.global; })} />
         <select value={l.showIf.op} onChange={e => setL(L => { L.showIf.op = e.target.value; })}>{['=', '!=', '>', '<', '>=', '<='].map(o => <option key={o}>{o}</option>)}</select>
         <Num v={l.showIf.value} onChange={v => setL(L => { L.showIf.value = Math.round(v); })} />
       </div>}
+      {l.showIf && showVar && <Row label={ownVar(showVar) ? 'Valor al empezar (y al disenar)' : 'Valor al disenar'}>
+        <Num v={proj.designVars?.[showVar] ?? 0} onChange={v => editProj?.(p => { (p.designVars ||= {})[showVar] = Math.round(v); })} /></Row>}
+      {l.showIf && showVar && !ownVar(showVar) && <div className="st-muted">Para una variable propia de la interfaz (la crea el juego al exportar) usa un nombre que empiece por re_ui_.</div>}
     </Section>);
 }
 
@@ -492,7 +518,7 @@ export function ScreensPanel({ proj, sid, setSid, editProj, addScreen, dupScreen
     <div className="ue-screens">
       <div className="ue-list">
         {proj.screens.map(s => {
-          const links = [...new Set(s.layers.filter(l => l.ui?.focus && l.ui.action?.type === 'goto').map(l => proj.screens.find(q => q.id === l.ui.action.screen)?.name).filter(Boolean))];
+          const links = [...new Set(s.layers.filter(l => l.ui?.focus && actionOf(l).type === 'goto').map(l => proj.screens.find(q => q.id === actionOf(l).screen)?.name).filter(Boolean))];
           return (
             <div key={s.id} className={'ue-scr' + (s.id === sid ? ' on' : '')} onClick={() => setSid(s.id)}>
               <Thumb proj={proj} doc={s} />

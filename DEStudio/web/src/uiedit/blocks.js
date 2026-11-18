@@ -2,6 +2,7 @@
 // convierten en Python de wui dentro de una zona marcada del codigo (proj.logic.source). Lo que se exporta y lo
 // que corre en el juego es siempre ese unico programa en Python.
 
+import { actionOf } from './model.js';
 export const BEGIN = '# --- reglas del editor de bloques (generado: cambialas en la pestana Reglas) ---';
 export const END = '# --- fin de las reglas ---';
 
@@ -175,7 +176,7 @@ export function layerScript(l, name, proj) {
     out.push(`    capa.animate(scale=1, x=${n(bx)}, y=${n(by)}, alpha=1, time=0.12)`);
     if (h.color && h.color.some(v => v !== 255)) out.push(`    capa.untint(time=0.12)`);
     out.push('', `@on_click(${q2(name)})`, `def ${f}_al_elegir(capa):`);
-    const a = ui.action || {};
+    const a = actionOf(l);
     const scr = proj.screens.find(s => s.id === a.screen);
     if (a.type === 'goto' && scr) out.push(`    goto(${q2((scr.name || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'pantalla')})`);
     else if (a.type === 'back') out.push('    back()');
@@ -197,6 +198,7 @@ export function layerScript(l, name, proj) {
 /** pasa la capa a codigo: quita del panel la accion y el efecto de foco (ahora los hace el script) */
 export function neutralizePanel(l) {
   if (!l.ui?.focus) return;
-  l.ui.action = { type: 'none' };
+  l.ui.actions = [];
+  delete l.ui.action;
   l.ui.hover = { ...(l.ui.hover || {}), scale: 1, dx: 0, dy: 0, alpha: 1, color: [255, 255, 255] };
 }

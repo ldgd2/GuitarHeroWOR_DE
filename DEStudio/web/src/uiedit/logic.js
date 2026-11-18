@@ -154,6 +154,27 @@ const hexA = (hex, a) => {
 };
 
 /** CSS de los efectos (z = zoom de la vista): {transform, filter, clipPath} */
+/** efectos en vivo de la capa (e_*) como filtro CSS; z = px de pantalla por px del editor. Igual que re-wor. */
+export function liveCss(s, z) {
+  const f = [];
+  const c3 = c => (Array.isArray(c) ? c : [255, 200, 120]).map(v => Math.round(Math.max(0, Math.min(255, v))));
+  if (s.e_hue) f.push(`hue-rotate(${s.e_hue}deg)`);
+  if (s.e_sat != null && s.e_sat < 1) f.push(`saturate(${Math.max(0, s.e_sat)})`);
+  if (s.e_inv > 0) f.push(`invert(${Math.min(1, s.e_inv)})`);
+  if (s.e_bright != null && s.e_bright !== 1) f.push(`brightness(${Math.max(0, s.e_bright)})`);
+  if (s.e_chroma > 0) {
+    const d = (s.e_chroma * z).toFixed(2);
+    f.push(`drop-shadow(-${d}px 0 0 rgba(255,0,0,.55)) drop-shadow(${d}px 0 0 rgba(0,90,255,.55))`);
+  }
+  if (s.e_glow > 0) {
+    const [r, g, b] = c3(s.e_glowc), a = Math.max(0, Math.min(1, s.e_glowa ?? 1));
+    f.push(`drop-shadow(0 0 ${(s.e_glow * z * 0.5).toFixed(2)}px rgba(${r},${g},${b},${a}))`);
+    f.push(`drop-shadow(0 0 ${(s.e_glow * z).toFixed(2)}px rgba(${r},${g},${b},${(a * 0.7).toFixed(3)}))`);
+  }
+  if (s.e_blur > 0.25) f.push(`blur(${(s.e_blur * z * 0.5).toFixed(2)}px)`);
+  return f.length ? f.join(' ') : undefined;
+}
+
 export function lookCss(v, z) {
   const f = [];
   if (v.blur > 0) f.push(`blur(${(v.blur * z).toFixed(2)}px)`);

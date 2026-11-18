@@ -12,25 +12,26 @@ import { Icon } from '../ui/icons.jsx';
 import { Timeline } from '../studio/Timeline.jsx';
 import { api, listProjects, openFromDisk, saveCopyToDisk } from '../studio/files.js';
 import { keyTimes, moveKeys, uid } from '../studio/keys.js';
-import { registerFont } from '../studio/raster.js';
+import { registerFont, textSize } from '../studio/raster.js';
+import { autoTransitions, defaultHints, hintLayers } from './presets.js';
 import { Stage2D, fitView } from './Stage2D.jsx';
 import { Stage3D } from './Stage3D.jsx';
 import { Preview } from './Preview.jsx';
 import { LogicWindow } from './LogicWindow.jsx';
 import { fileToBase64 } from '../studio/AssetBrowser.jsx';
+import { animClips, animSource, isAnimClip } from './anims.js';
 import { bakeTextures } from './bake.js';
 import { MenuBar, OptionsBar, TOOL_KEYS, ToolBar } from './chrome.jsx';
 import { ResourcesWindow, ensureFont, uploadFiles, useGlobalDrop } from './resources.jsx';
 import { AssetsPanel, AlignBar, LayersPanel, PropsPanel, ScreensPanel, moveLayers } from './panels.jsx';
 import {
   CAM25, CAM3D_Z, CLIPS, DEFAULT_SHAPE, DEFAULT_TEXT, History, MODES, TYPE_ICON, ancestors, clean, clipOf, descendants,
-  newLayer, newProject, newScreen, normalize, propsFor, setProp, stateAt, activeCamAt, W, H,
-} from './model.js';
+  newLayer, newProject, newScreen, normalize, propsFor, setProp, stateAt, activeCamAt, W, H, LIVE_PROPS, LIVE_DEFAULTS, BLEND_MODES, cam25At, restorePanel } from './model.js';
 import { assetUrl, fitText } from './view2d.js';
 
 const clone = o => structuredClone(o);
 const DEFAULT_OPTS = { text: { ...DEFAULT_TEXT, color: [255, 255, 255] }, shape: JSON.parse(JSON.stringify(DEFAULT_SHAPE)),
-  snap: true, snapLayers: true, grid: false, gridSize: 20, guides: true, showButtons: false, bg: 'dark' };
+  snap: true, snapLayers: true, grid: false, gridSize: 20, guides: true, showButtons: false, bg: 'dark', outside: true };
 let clipboard = null;   // capas copiadas (con sus claves): sirven entre pantallas
 
 function App() {
@@ -49,6 +50,9 @@ function App() {
   const [topTab, setTopTab] = useState('props');
   const [botTab, setBotTab] = useState('layers');
   const [showTl, setShowTl] = useState(true);
+  // vista de animacion: interfaz a la izquierda, claves a la derecha (a toda la altura)
+  const [animSide, setAnimSide] = useState(() => { try { return localStorage.getItem('ue-anim-side') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('ue-anim-side', animSide ? '1' : '0'); } catch { /* sin almacenamiento */ } }, [animSide]);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(null);
   const [qb, setQb] = useState(null);
@@ -96,7 +100,52 @@ function App() {
 
   const doc = proj ? scrOf(proj, sid) : null;
   const mode = proj?.mode || '2d';
-  const dur = doc && clip !== 'base' ? doc.clips[clip].duration : 0;
+  const dur = doc && clip !== 'base' ? doc.clips[clip]?.duration || 1 : 0;
+  // animaciones con nombre (se lanzan desde el codigo con play_anim): pestanas extra de la linea de tiempo
+  useEffect(() => { if (doc && clip !== 'base' && !doc.clips[clip]) setClip('intro'); }, [doc?.id, clip]);
+  const curAnim = doc && isAnimClip(clip, doc.clips[clip]) ? doc.clips[clip] : null;
+  const addAnim = () => {
+    const used = new Set(proj.screens.flatMap(s => animClips(s).map(([, c]) => c.name)));
+    let n = 1;
+    while (used.has(`animacion ${n}`)) n++;
+    const key = 'a_' + Math.random().toString(36).slice(2, 9);
+    edit(d => { d.clips[key] = { custom: true, name: `animacion ${n}`, duration: 1, tracks: {}, ...(mode === '3d' ? { cuts: [] } : {}) }; });
+    setClip(key); setT(0);
+  };
+  const delAnim = () => { const k = clip; setClip('intro'); edit(d => { delete d.clips[k]; }); };
+  // clic derecho en una capa de la linea de tiempo: claves de sus propiedades y efectos, y su modo de fusion
+  const LIVE_ON = { e_glow: 24, e_glowa: 1, e_blur: 8, e_chroma: 6, e_bright: 1.6, e_sat: 0, e_inv: 1, e_hue: 120, e_grain: 0.5, e_flicker: 0.6, e_shake: 6 };
+  const rowMenu = (id, at) => {
+    if (clip === 'base') return [{ label: 'Elige Entrada, Bucle, Salida o una animacion para poner claves', act: () => {} }];
+    const isCam = id === CAM25;
+    const l = isCam ? null : doc.layers.find(q => q.id === id);
+    if (!isCam && !l) return [];
+    const st = isCam ? cam25At(doc, clip, at) : stateAt(doc, l, clip, at);
+    const key = (prop, v, from) => edit(d => {
+      const L = isCam ? { id: CAM25 } : d.layers.find(q => q.id === id);
+      const has = d.clips[clip]?.tracks?.[id]?.[prop]?.length;
+      if (!has && from !== undefined && at > 0.001) setProp(d, clip, L, prop, from, 0);   // que el efecto entre animado
+      setProp(d, clip, L, prop, v, at);
+    });
+    const items = [{ sep: 'Clave de' }];
+    for (const [p, label] of propsFor(mode, isCam ? CAM25 : l.type)) items.push({ label, icon: 'keyframe', act: () => key(p, st[p]) });
+    if (!isCam && ['image', 'text', 'shape'].includes(l.type)) {
+      items.push({ sep: 'Efecto (aparece animado)' });
+      for (const [p, label] of LIVE_PROPS) {
+        if (p === 'e_glowc') { items.push({ label, icon: 'palette', act: () => key(p, st[p] ?? LIVE_DEFAULTS[p]) }); continue; }
+        const cur = st[p] ?? LIVE_DEFAULTS[p];
+        const on = cur !== LIVE_DEFAULTS[p] ? cur : LIVE_ON[p] ?? cur;
+        items.push({ label, icon: p === 'e_glow' ? 'glow' : p === 'e_blur' ? 'blur' : p === 'e_chroma' ? 'chroma' : p === 'e_grain' ? 'grain' : p === 'e_shake' ? 'shake' : p === 'e_flicker' ? 'flicker' : p === 'e_hue' ? 'hue' : 'fx',
+          act: () => key(p, on, LIVE_DEFAULTS[p]) });
+      }
+      items.push({ sep: 'Modo de fusion' });
+      for (const [k, v] of BLEND_MODES) items.push({ label: v, on: (l.blend || 'normal') === k, act: () => edit(d => { d.layers.find(q => q.id === id).blend = k; }) });
+    }
+    items.push({ sep: true });
+    items.push({ label: 'Borrar sus claves en este clip', icon: 'trash', act: () => edit(d => { if (d.clips[clip]?.tracks) delete d.clips[clip].tracks[id]; }) });
+    return items;
+  };
+  const animCall = curAnim ? `play_anim(${JSON.stringify(curAnim.name)})` : '';
   const selLayers = doc ? sel.map(id => doc.layers.find(l => l.id === id)).filter(Boolean) : [];
 
   useEffect(() => {
@@ -138,7 +187,9 @@ function App() {
     setBusy('Preparando las imagenes para el juego...');
     try {
       const textures = await bakeTextures(proj, (i, n) => setBusy(`Imagenes para el juego: ${i} de ${n}`));
-      return { project: { ...proj, name: clean(proj.name) || 'interfaz' }, textures };
+      const anims = animSource(proj);
+      for (const w of anims.warnings.slice(0, 3)) toast(w, 'warn');
+      return { project: { ...proj, name: clean(proj.name) || 'interfaz', logic: { ...(proj.logic || {}), anims: anims.text } }, textures };
     } finally { setBusy(null); }
   };
   const doExport = async () => {
@@ -277,6 +328,10 @@ function App() {
     setBusy(`Importando ${file.name}...`);
     try {
       const r = await api('/api/ui/import_layered', { pid: projRef.current.id, filename: file.name, data: await fileToBase64(file) });
+      // fuentes de los textos: al proyecto (y cargadas antes de medir los textos)
+      const fonts = [...new Map(r.layers.filter(L => L.font).map(L => [L.font.file, L.font])).values()];
+      for (const f of fonts) { try { await registerFont(f.family, assetUrl(projRef.current, f.file)); } catch { /* se ve con otra */ } }
+      if (fonts.length) editProj(p => { p.fonts = [...(p.fonts || []).filter(x => !fonts.some(f => f.file === x.file)), ...fonts]; });
       const k = Math.min(W / r.w, H / r.h), ox = (W - r.w * k) / 2, oy = (H - r.h * k) / 2;
       const fill = d => {
         const groups = {};
@@ -296,7 +351,20 @@ function App() {
         };
         for (const L of r.layers) {
           const parent = groupOf(L.group || []);
-          const l = newLayer(mode, 'image', { name: L.name, parent, visible: L.visible,
+          if (L.kind === 'text') {   // texto de Photoshop: texto editable con su fuente
+            const px = Math.max(4, L.size * k);
+            const t = newLayer(mode, 'text', { name: L.name, parent, visible: L.visible, blend: L.blend || 'normal',
+              text: { ...DEFAULT_TEXT, value: L.text, font: L.font?.family || DEFAULT_TEXT.font, weight: L.bold ? 700 : 400, italic: !!L.italic,
+                px, color: L.color, align: L.align, spacing: (L.spacing || 0) * px, line: L.line || 1.15, box: 'auto' },
+              base: { x: ox + L.cx * k, y: oy + L.cy * k, rot: L.rot || 0, alpha: L.opacity ?? 1 } });
+            for (const [kk, v] of Object.entries(L.fx || {})) t.fx[kk] = { ...t.fx[kk], ...v, ...(v.width ? { width: v.width * k } : {}),
+              ...(v.size ? { size: v.size * k } : {}), ...(v.blur ? { blur: v.blur * k } : {}), ...(v.dx != null ? { dx: v.dx * k, dy: v.dy * k } : {}) };
+            fitText(t);
+            t.base.order = nextOrder(d, parent);
+            d.layers.push(t);
+            continue;
+          }
+          const l = newLayer(mode, 'image', { blend: L.blend || 'normal', name: L.name, parent, visible: L.visible,
             image: { custom: true, file: L.file, name: L.file, svg: false, w: L.w, h: L.h },
             base: { x: ox + (L.x + L.w / 2) * k, y: oy + (L.y + L.h / 2) * k, w: L.w * k, h: L.h * k, alpha: L.opacity } });
           l.base.order = nextOrder(d, parent);
@@ -353,6 +421,26 @@ function App() {
   };
 
   // ---------------------------------------------------------------- pantallas
+  // indicaciones de botones (verde continuar, rojo volver...) y entrada / salida automaticas
+  const addHints = () => {
+    if (mode === '3d') { toast('Las indicaciones son para pantallas 2D y 2.5D', 'warn'); return; }
+    const font = proj.fonts?.[0]?.family || DEFAULT_TEXT.font;
+    const ls = hintLayers(mode, defaultHints(doc), { font, measure: (v, px) => textSize({ ...DEFAULT_TEXT, font, value: v, px })[0] });
+    edit(d => {
+      const old = d.layers.find(l => l.name === 'indicaciones de botones' && !l.parent);
+      if (old) { const gone = descendants(d, old.id); d.layers = d.layers.filter(l => !gone.has(l.id)); }
+      ls[0].base.order = nextOrder(d);
+      d.layers.push(...ls);
+    });
+    setSel([ls[0].id]);
+    toast('Indicaciones anadidas: cambia sus textos o colores en sus capas');
+  };
+  const addTransitions = () => {
+    if (mode === '3d') { toast('Solo para pantallas 2D y 2.5D', 'warn'); return; }
+    const has = ['intro', 'outro'].some(c => Object.keys(doc.clips[c]?.tracks || {}).length);
+    edit(d => { const t = autoTransitions(d); d.clips.intro = { ...d.clips.intro, ...t.intro }; d.clips.outro = { ...d.clips.outro, ...t.outro }; });
+    toast(has ? 'Entrada y salida rehechas (se reemplazaron las que habia)' : 'Entrada y salida creadas: ajustalas en la linea de tiempo');
+  };
   const addScreen = () => { const s = newScreen(mode, `Pantalla ${proj.screens.length + 1}`); editProj(p => { p.screens.push(s); }); setSid(s.id); };
   const dupScreen = () => {
     const s = clone(doc); s.id = uid('s'); s.name = doc.name + ' copia';
@@ -369,7 +457,7 @@ function App() {
     editProj(p => {
       p.screens = p.screens.filter(s => s.id !== gone);
       if (p.start === gone) p.start = p.screens[0].id;
-      for (const s of p.screens) for (const l of s.layers) if (l.ui?.action?.type === 'goto' && l.ui.action.screen === gone) l.ui.action.type = 'none';
+      for (const s of p.screens) for (const l of s.layers) if (l.ui?.actions) l.ui.actions = l.ui.actions.filter(a => !(a.type === 'goto' && a.screen === gone));
     });
     setSid(next);
   };
@@ -441,7 +529,7 @@ function App() {
   const rows = [
     ...(mode === '25d' ? [{ id: CAM25, name: 'Camara 2.5D', icon: 'cam', props: propsFor('25d', CAM25), tracks: clipOf(doc, clip)?.tracks?.[CAM25] }] : []),
     ...doc.layers.filter(l => l.visible !== false).sort((a, b) => (b.base.order || 0) - (a.base.order || 0)).map(l => ({ id: l.id, name: l.name, icon: TYPE_ICON[l.type],
-      props: propsFor(mode, l.type), tracks: clipOf(doc, clip)?.tracks?.[l.id] })),
+      props: [...propsFor(mode, l.type), ...LIVE_PROPS.filter(([k]) => clipOf(doc, clip)?.tracks?.[l.id]?.[k])], tracks: clipOf(doc, clip)?.tracks?.[l.id] })),
   ];
   const cams = doc.layers.filter(l => l.type === 'camera');
   const lanes = mode === '3d' && clip !== 'base' ? [{
@@ -464,7 +552,7 @@ function App() {
   // "Volver al panel" desde las propiedades de una capa
   const dropScript = id => editProj(p => {
     for (const s of p.screens) for (const l of s.layers) if (l.id === id && l.script) {
-      if (l.script.panel && l.ui) { l.ui.action = l.script.panel.action; l.ui.hover = l.script.panel.hover; }
+      restorePanel(l);
       delete l.script;
     }
   });
@@ -533,6 +621,9 @@ function App() {
       { label: 'Importar PSD o AI en esta pantalla', icon: 'upload', act: () => pickLayered(false) },
       { label: 'Pantalla nueva desde PSD o AI', icon: 'screens', act: () => pickLayered(true) },
       { sep: 1 },
+      { label: 'Anadir indicaciones de botones', icon: 'plus', act: addHints },
+      { label: 'Animaciones de entrada y salida automaticas', icon: 'play', act: addTransitions },
+      { sep: 1 },
       { label: 'Usar como inicial', icon: 'play', disabled: proj.start === doc.id, act: () => editProj(p => { p.start = doc.id; }) },
       { label: 'Borrar esta pantalla', icon: 'trash', disabled: proj.screens.length < 2, act: removeScreen },
       { sep: 1 },
@@ -552,6 +643,7 @@ function App() {
       { label: 'Guias', checked: opts.guides, act: () => setOpts(o => { o.guides = !o.guides; }) },
       { label: 'Borrar todas las guias', act: () => editProj(p => { p.guides = { x: [], y: [] }; }) },
       { label: 'Cuadricula', checked: opts.grid, act: () => setOpts(o => { o.grid = !o.grid; }) },
+      { label: 'Ver lo que sale del lienzo', checked: opts.outside !== false, act: () => setOpts(o => { o.outside = o.outside === false; }) },
       { label: 'Marcar los botones', checked: opts.showButtons, act: () => setOpts(o => { o.showButtons = !o.showButtons; }) },
       { label: 'Fondo', sub: [['dark', 'Oscuro'], ['black', 'Negro'], ['checker', 'Cuadros (transparencia)'], ['light', 'Claro']].map(([k, v]) =>
         ({ label: v, checked: opts.bg === k, act: () => setOpts(o => { o.bg = k; }) })) },
@@ -584,16 +676,37 @@ function App() {
             {proj.start === s.id && <Icon n="play" s={11} />}{s.name}</button>)}
           <button className="st-icon" onClick={addScreen} title="Pantalla nueva"><Icon n="plus" s={14} /></button>
         </div>
+        <div className={'ue-split' + (animSide && showTl ? ' side' : '')}>
         {mode === '3d'
           ? <Stage3D key={doc.id} proj={proj} doc={doc} clip={clip} t={t} sel={sel} setSel={setSel} live={live} />
           : <Stage2D proj={proj} doc={doc} mode={mode} clip={clip} t={t} sel={sel} setSel={setSel} tool={tool} setTool={setTool}
             edit={edit} live={live} opts={opts} view={view} setView={setView} refImg={ref} refAlpha={refAlpha}
             editingText={editingText} setEditingText={setEditingText} />}
-        {showTl && <Timeline clips={CLIPS} clip={clip} setClip={setClip} dur={dur} setDur={v => edit(d => { d.clips[clip].duration = v; })}
+        {showTl && <Timeline clips={[...CLIPS, ...animClips(doc).map(([k, c]) => [k, c.name, `Animacion propia: ${`play_anim(${JSON.stringify(c.name)})`} en el codigo`])]}
+          side={animSide} rowMenu={rowMenu}
+          extra={<>
+            <button className={'st-icon' + (animSide ? ' on' : '')} title={animSide ? 'Linea de tiempo abajo' : 'Vista de animacion: la interfaz a la izquierda y las claves a la derecha'}
+              onClick={() => setAnimSide(v => !v)}><Icon n="split" /></button>
+            <button className="st-icon" title="Nueva animacion con nombre (se lanza desde el codigo, al pulsar un boton, una tecla...)" onClick={addAnim}><Icon n="plus" /></button>
+            {curAnim && <div className="st-tlanim">
+              <input value={curAnim.name} title="Nombre de la animacion (el que se usa en el codigo)" onChange={e => { const v = e.target.value; edit(d => { d.clips[clip].name = v; }); }} />
+              <code title="Copiar" onClick={() => { navigator.clipboard?.writeText(animCall).catch(() => {}); toast('Copiado: ' + animCall); }}>{animCall}</code>
+              <button className="st-icon" title="Borrar esta animacion" onClick={delAnim}><Icon n="trash" /></button>
+            </div>}
+          </>}
+          clip={clip} setClip={setClip} dur={dur} setDur={v => edit(d => { d.clips[clip].duration = v; })}
           t={t} setT={setT} playing={playing} setPlaying={setPlaying} rows={rows} lanes={lanes}
           sel={sel[0]} setSel={id => setSel(id ? [id] : [])} selKey={selKey} setSelKey={k => { setSelKey(k); setSelCut(null); }}
           onMoveKeys={(id, props, from, to, first) => edit(d => moveKeys(d.clips[clip], id, props, from, to), first)}
+          onEase={(id, prop, kt, ease, scope) => edit(d => {
+            const tr = d.clips[clip]?.tracks?.[id];
+            if (!tr) return;
+            const ks = scope === 'row' ? Object.values(tr).flat() : scope === 'track' ? tr[prop] || [] : (tr[prop] || []).filter(k => Math.abs(k.t - kt) < 1e-3);
+            for (const k of ks) k.ease = ease;
+          })}
+          onDeleteKey={(id, prop, kt) => edit(d => { const tr = d.clips[clip]?.tracks?.[id]; if (tr?.[prop]) tr[prop] = tr[prop].filter(k => Math.abs(k.t - kt) > 1e-3); })}
           baseText={`Base: la pantalla "${doc.name}" sin animar. Elige Entrada, Bucle o Salida para animarla con claves (cada pantalla tiene las suyas).`} />}
+              </div>
       </main>
       <aside className="ue-dock">
         <div className="ue-panel top">

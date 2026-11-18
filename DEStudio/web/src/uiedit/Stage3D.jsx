@@ -9,6 +9,7 @@ import { Icon } from '../ui/icons.jsx';
 import { Viewport3D } from '../studio/Viewport3D.js';
 import { useRasterVersion, cachedRaster } from '../studio/LayerCanvas.jsx';
 import { activeCamAt, ancestors, setProp, stateAt } from './model.js';
+import { liveCss } from './logic.js';
 import { layerUrl } from './view2d.js';
 
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
@@ -98,6 +99,29 @@ export function Stage3D({ proj, doc, clip, t, sel, setSel, live, preview }) {
     return e;
   };
 
+  // con efectos en vivo (e_*): la textura pasada por el mismo filtro CSS que el lienzo 2D (y que re-wor)
+  const fxTex = useRef(new Map());
+  const texLive = (l, w, h, s) => {
+    const base = texFor(l, w, h);
+    const f = liveCss(s, 2);
+    if (!f || !base.r.ready && l.type === 'image') return base;
+    const key = `${l.id}|${w}x${h}|${f}`;
+    let e = fxTex.current.get(key);
+    if (e && e.src === base.r.canvas) return e;
+    const extra = Math.ceil((s.e_glow || 0) * 1.5 + (s.e_blur || 0) + (s.e_chroma || 0)) + 2;
+    const src = base.r.canvas, c = document.createElement('canvas');
+    c.width = src.width + extra * 4; c.height = src.height + extra * 4;
+    const g = c.getContext('2d');
+    g.filter = f;
+    g.drawImage(src, extra * 2, extra * 2);
+    const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace;
+    e?.tx.dispose();
+    e = { tx, r: { ...base.r, pad: base.r.pad + extra }, src };
+    fxTex.current.set(key, e);
+    if (fxTex.current.size > 120) { const [k, old] = fxTex.current.entries().next().value; old.tx.dispose(); fxTex.current.delete(k); }
+    return e;
+  };
+
   // ---- pantalla -> escena (cada cambio de pantalla, clip, tiempo o imagen cargada)
   useEffect(() => {
     const v = V.current;
@@ -151,7 +175,7 @@ export function Stage3D({ proj, doc, clip, t, sel, setSel, live, preview }) {
         let alpha = s.alpha;
         for (const a of ancestors(doc, l)) alpha *= stateAt(doc, a, clip, t).alpha;
         const w = Math.max(1, s.w), h = Math.max(1, s.h);
-        const { tx, r } = texFor(l, w, h);
+        const { tx, r } = texLive(l, w, h, s);
         o.mesh.scale.set(w + r.pad * 2, h + r.pad * 2, 1);
         o.mesh.position.set((0.5 - s.ax) * w, (s.ay - 0.5) * h, 0);
         const mat = o.mesh.material;

@@ -11,7 +11,7 @@ import { PreviewLogic, PAD_KEYS, compileLogic } from './logic.js';
 import { programText } from './scripts.js';
 import { Stage2D } from './Stage2D.jsx';
 import { Stage3D } from './Stage3D.jsx';
-import { W } from './model.js';
+import { W, actionOf, condVar } from './model.js';
 
 const OPTS = { bg: 'black', snap: false, guides: false };
 const b64bytes = b => Uint8Array.from(atob(b), c => c.charCodeAt(0));
@@ -29,8 +29,8 @@ export function Preview({ proj, close }) {
   const vars = useMemo(() => {
     const out = new Set();
     for (const s of proj.screens) for (const l of s.layers) {
-      if (l.showIf?.global) out.add(l.showIf.global);
-      if (l.ui?.focus && l.ui.action?.type === 'set' && l.ui.action.global) out.add(l.ui.action.global);
+      if (condVar(l.showIf)) out.add(condVar(l.showIf));
+      if (l.ui?.focus && actionOf(l).type === 'set' && actionOf(l).global) out.add(actionOf(l).global);
     }
     for (const m of source.matchAll(/game\.(?:get|set)\(\s*["']\$?([A-Za-z_][A-Za-z0-9_]*)["']/g)) out.add(m[1]);
     return [...out];
@@ -133,7 +133,8 @@ export function Preview({ proj, close }) {
         <div className="ue-prevstage" ref={stageRef} onPointerMove={onMouse} onPointerDown={onMouse} onPointerUp={onMouse}>
           {!fr && <div className="ue-prevclosed"><p>La interfaz se ha cerrado.</p><button className="primary" onClick={start}><Icon n="play" />Abrir de nuevo</button></div>}
           {fr && proj.mode !== '3d' && <Stage2D proj={proj} doc={fr.doc} mode={proj.mode} clip={fr.clip} t={fr.t} sel={[]} setSel={() => {}} tool="move"
-            edit={() => {}} live={null} opts={OPTS} view={view} setView={setView} readOnly overrides={overrides} onPick={pick} />}
+            edit={() => {}} live={null} opts={OPTS} view={view} setView={setView} readOnly overrides={overrides} onPick={pick}
+            onListWheel={(x, y, d) => !L?.locked && !!r?.wheel(x, y, d)} />}
           {fr && proj.mode === '3d' && <Stage3D key={fr.doc.id} proj={proj} doc={fr.doc} clip={fr.clip} t={fr.t} sel={[]} setSel={() => {}} preview />}
         </div>
         <aside className="ue-prevside">

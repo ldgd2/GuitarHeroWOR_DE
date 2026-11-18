@@ -19,6 +19,7 @@
 #include "de/frame_pacing.hpp"
 #include "de/qb_bridge.hpp"
 #include "de/render_sandbox.hpp"
+#include "nativegfx/full/full_pipeline.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -73,6 +74,18 @@ void ApplyLiveDisplayOptions(const GraphicsConfig& g) {
   Set("swap_post_effect", g.fxaa ? "fxaa" : "none");   // el SDK lo relee en cada swap
   // Frame Rate: limite de re-wor sobre el bucle del motor (el VBlank sigue a 60, ver ApplyDisplayOptions)
   g_frame_cap = std::clamp(g.refresh_hz, 30, 240);
+
+  if (nativegfx::FullPipeline::Instance().IsEnabled() && nativegfx::FullPipeline::Instance().GetRenderer()) {
+    auto* ren = nativegfx::FullPipeline::Instance().GetRenderer();
+    ren->SetVSync(g.vsync);
+    uint32_t aniso = 1;
+    if (g.aniso >= 2 && g.aniso <= 16) aniso = static_cast<uint32_t>(g.aniso);
+    else if (g.aniso == 1) aniso = 2;
+    else if (g.aniso == 2) aniso = 4;
+    else if (g.aniso == 3) aniso = 8;
+    else if (g.aniso == 4) aniso = 16;
+    ren->SetAnisotropy(aniso);
+  }
 }
 
 // ---------------------------------------------------------------------------- resolucion con confirmacion
@@ -91,13 +104,48 @@ void ApplyWindow(const std::string& res, int mode) {
   Set("fullscreen_exclusive", mode == 2 ? "true" : "false");
   Set("resolution", res);   // el SDK cambia el tamano de la ventana / el modo exclusivo al momento
   Set("fullscreen", mode > 0 ? "true" : "false");
+
+  // Si el pipeline nativo completo está activo, redimensionar sus Render Targets y SwapChain de inmediato
+  if (nativegfx::FullPipeline::Instance().IsEnabled() && nativegfx::FullPipeline::Instance().GetRenderer()) {
+    uint32_t w = 1920, h = 1080;
+    if (res == "720p") { w = 1280; h = 720; }
+    else if (res == "768p" || res == "1366x768") { w = 1366; h = 768; }
+    else if (res == "900p" || res == "1600x900") { w = 1600; h = 900; }
+    else if (res == "1080p" || res == "1920x1080") { w = 1920; h = 1080; }
+    else if (res == "1200p" || res == "1920x1200") { w = 1920; h = 1200; }
+    else if (res == "2560x1080") { w = 2560; h = 1080; }
+    else if (res == "1440p" || res == "2560x1440") { w = 2560; h = 1440; }
+    else if (res == "1600p" || res == "2560x1600") { w = 2560; h = 1600; }
+    else if (res == "3440x1440") { w = 3440; h = 1440; }
+    else if (res == "4k" || res == "3840x2160") { w = 3840; h = 2160; }
+    else {
+      auto x_pos = res.find('x');
+      if (x_pos != std::string::npos && x_pos > 0 && x_pos + 1 < res.size()) {
+        try {
+          uint32_t rw = std::stoul(res.substr(0, x_pos));
+          uint32_t rh = std::stoul(res.substr(x_pos + 1));
+          if (rw >= 640 && rh >= 480) { w = rw; h = rh; }
+        } catch (...) {}
+      }
+    }
+    nativegfx::FullPipeline::Instance().GetRenderer()->Resize(w, h);
+    float scale = float(h) / 720.0f;
+    nativegfx::DeviceTracker::Instance().SetResolutionScale(scale > 0.0f ? scale : 1.0f);
+  }
 }
 
 const char* ResLabel(const std::string& r) {
-  if (r == "720p") return "1280 x 720";
-  if (r == "1080p") return "1920 x 1080";
-  if (r == "1440p") return "2560 x 1440";
-  if (r == "4k") return "3840 x 2160";
+  if (r == "720p") return "1280 x 720 (720p HD)";
+  if (r == "768p" || r == "1366x768") return "1366 x 768";
+  if (r == "900p" || r == "1600x900") return "1600 x 900 (900p HD+)";
+  if (r == "1080p" || r == "1920x1080") return "1920 x 1080 (1080p FHD)";
+  if (r == "1200p" || r == "1920x1200") return "1920 x 1200 (16:10)";
+  if (r == "2560x1080") return "2560 x 1080 (Ultrawide)";
+  if (r == "1440p" || r == "2560x1440") return "2560 x 1440 (1440p 2K)";
+  if (r == "1600p" || r == "2560x1600") return "2560 x 1600 (16:10)";
+  if (r == "3440x1440") return "3440 x 1440 (Ultrawide QHD)";
+  if (r == "4k" || r == "3840x2160") return "3840 x 2160 (4K UHD)";
+  if (!r.empty()) return r.c_str();
   return "la del escritorio";
 }
 const char* ModeLabel(int m) { return m == 2 ? "pantalla completa" : m == 1 ? "sin bordes" : "ventana"; }
@@ -209,7 +257,7 @@ int Signed10(float v) { return std::clamp(static_cast<int>(std::lround(v * 5)) +
 
 void ToMenu(const GraphicsConfig& g, int* m) {
   m[kPreset] = std::clamp(g.preset, 0, 4);
-  m[kApi] = g.backend == "vulkan" ? 1 : 0;
+  m[kApi] = g.backend == "vulkan" ? 1 : g.backend == "d3d11" ? 2 : 0;
   m[kResolution] = 0;
   for (int i = 0; i < 5; ++i) if (g.resolution == kResolutions[i]) m[kResolution] = i;
   m[kDisplayMode] = std::clamp(g.window_mode, 0, 2);
@@ -236,7 +284,7 @@ void FromMenu(int i, int v, GraphicsConfig& g) {
   auto in = [&](int n) { return std::clamp(v, 0, n - 1); };
   switch (i) {
     case kPreset: g.ApplyPreset(in(5)); return;   // 4 = Custom: no cambia nada
-    case kApi: g.backend = in(2) ? "vulkan" : "d3d12"; break;
+    case kApi: g.backend = in(3) == 1 ? "vulkan" : in(3) == 2 ? "d3d11" : "d3d12"; break;
     case kResolution: g.resolution = kResolutions[in(5)]; break;
     case kDisplayMode: g.window_mode = in(3); break;
     case kFrameRate: g.refresh_hz = kRates[in(6)]; break;
@@ -284,7 +332,7 @@ void SyncCrowd(uint8_t* base, int level) {
 // Lo que el SDK solo puede crear al arrancar. Resolucion, modo de pantalla y frecuencia van al momento.
 bool NeedsRestart(const GraphicsConfig& g) {
   const GraphicsConfig& b = g_boot;
-  return g.backend != b.backend || g.resolution_scale != b.resolution_scale || g.msaa2x != b.msaa2x ||
+  return g.backend != b.backend || g.pipeline_mode != b.pipeline_mode || g.resolution_scale != b.resolution_scale || g.msaa2x != b.msaa2x ||
          g.aniso != b.aniso || g.texture_cache_mb != b.texture_cache_mb;
 }
 
@@ -495,7 +543,7 @@ class FpsCounter final : public rex::ui::ImGuiDialog {
         if (fp.engine_speed > 0)
           ImGui::TextDisabled("velocidad del juego  %.2fx%s", fp.engine_speed, fp.fallback ? "  (protegido: 60)" : "");
         if (fp.song_speed > 0) ImGui::TextDisabled("cancion  %.2fx", fp.song_speed);
-        ImGui::TextDisabled("%s", BootGraphics().backend == "vulkan" ? "Vulkan" : "Direct3D 12");
+        ImGui::TextDisabled("%s", BootGraphics().backend == "vulkan" ? "Vulkan" : BootGraphics().backend == "d3d11" ? "Direct3D 11" : "Direct3D 12");
       }
     }
     ImGui::End();

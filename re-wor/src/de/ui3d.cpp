@@ -8,11 +8,13 @@
 #include <cfloat>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -37,11 +39,16 @@ namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 
 struct Cam { float p[3], R[3], U[3], F[3], fov = 50; };
-struct ObjFrame { int obj; float rgba[4]; float c[12]; };
+// e (opcional, tras las esquinas): efectos en vivo del editor: resplandor, r, g, b, fuerza, desenfoque,
+// aberracion cromatica, brillo, saturacion, invertir, tono (grados)
+// ... grano, parpadeo, temblor (px)
+struct ObjFrame { int obj; float rgba[4]; float c[12]; bool has_e = false; float e[14]; };
 struct Frame { Cam cam; std::vector<ObjFrame> objs; };
 struct Obj {
   int tex = -1;
   float order = 0;
+  int blend = 0;         // modo de fusion (rex::ui::ImmediateBlend)
+  int list = -1, litem = -1;   // elemento de una lista con desplazamiento de su pantalla
   int focus = -1;        // boton de su pantalla (indice) o -1
   int show_on = -1;      // solo visible con el foco de este boton
   std::string cond;      // variable del juego de la condicion ("" = sin condicion)
@@ -65,8 +72,18 @@ struct Focus {
   float scale = 1, col[3] = {1, 1, 1}, alpha = 1, dx = 0, dy = 0;
   Action act;
 };
+// lista con desplazamiento (grupo del editor; ver DEStudio/web/src/uiedit/lists.js, la misma cuenta)
+struct ListDef {
+  int ax = 1, view = 1, n = 1;     // eje (0 x, 1 y), elementos visibles, elementos
+  float step = 40;                 // px del editor entre elementos
+  bool loop = true, center = true, fade = true, clip = true, wheel = true;
+  float box[4] = {0, 0, 0, 0};     // caja visible (px del editor): x0 y0 x1 y1
+  float start = 0;                 // desplazamiento al entrar
+  std::vector<int> item_focus;     // boton de cada elemento (o -1)
+};
 struct ScreenDef {
   std::string name, on_back = "auto";
+  std::vector<ListDef> lists;
   int default_focus = -1;
   std::vector<Focus> focus;
   std::map<std::string, std::vector<Frame>> clips;
@@ -84,6 +101,9 @@ struct Scene {
   // texturas del drawer (se crean en el hilo de dibujo; nullptr = aun no / fallo)
   std::vector<std::unique_ptr<rex::ui::ImmediateTexture>> tex;
   std::vector<bool> tex_tried;
+  // variantes de una textura para los filtros (clave: textura * 16 + tipo; ver Variant)
+  std::map<int, std::unique_ptr<rex::ui::ImmediateTexture>> var;
+  std::set<int> var_tried;
   std::shared_ptr<const wui::Program> logic;   // ui3d/<n>/logic.wuib (o nada)
 };
 
@@ -100,6 +120,7 @@ struct Play {
   std::vector<int> history;
   int focus = -1;
   std::vector<float> ff;           // foco animado de cada boton de la pantalla (0..1)
+  std::vector<float> loff;         // desplazamiento de cada lista de la pantalla (vacio = el de entrada)
   Clock::time_point last_anim{};
   // raton (hilo de dibujo -> hilo del juego)
   ImVec2 last_mouse{-1, -1};
@@ -159,6 +180,7 @@ bool LoadScene(const fs::path& file, Scene& s) {
       clip = nullptr; fr = nullptr;
     } else if (cmd == "obj") {
       int i; Obj o; ss >> i >> o.tex >> o.order;
+      if (int bl = 0; ss >> bl) o.blend = std::clamp(bl, 0, static_cast<int>(rex::ui::kBlendCount) - 1);
       cur();
       o.screen = static_cast<int>(scr - s.screens.data());
       if (i >= 0 && i < 8192) { if (static_cast<int>(s.objs.size()) <= i) s.objs.resize(i + 1); s.objs[i] = o; }
@@ -175,6 +197,26 @@ bool LoadScene(const fs::path& file, Scene& s) {
       Obj& o = s.objs[i];
       ss >> o.kind >> o.x0 >> o.y0 >> o.w0 >> o.h0;
       std::getline(ss >> std::ws, o.name);
+    } else if (cmd == "list") {
+      int li = -1; ss >> li;
+      if (li < 0 || li >= 256) continue;
+      auto& Ls = cur().lists;
+      if (static_cast<int>(Ls.size()) <= li) Ls.resize(li + 1);
+      ListDef& L = Ls[li];
+      int lp = 1, ce = 1, fa = 1, cl = 1, wh = 1;
+      ss >> L.ax >> L.step >> L.view >> lp >> ce >> fa >> cl >> wh >> L.n >> L.box[0] >> L.box[1] >> L.box[2] >> L.box[3] >> L.start;
+      L.loop = lp != 0; L.center = ce != 0; L.fade = fa != 0; L.clip = cl != 0; L.wheel = wh != 0;
+      L.n = std::clamp(L.n, 1, 4096); L.view = std::clamp(L.view, 1, L.n);
+      if (!(L.step > 0)) L.step = 40;
+      L.item_focus.assign(L.n, -1);
+    } else if (cmd == "litem") {
+      int li = -1, idx = -1, f = -1; ss >> li >> idx >> f;
+      auto& Ls = cur().lists;
+      if (li >= 0 && li < static_cast<int>(Ls.size()) && idx >= 0 && idx < Ls[li].n) Ls[li].item_focus[idx] = f;
+    } else if (cmd == "lobj") {
+      int i = -1, li = -1, idx = -1; ss >> i >> li >> idx;
+      if (i < 0 || i >= static_cast<int>(s.objs.size())) continue;
+      s.objs[i].list = li; s.objs[i].litem = idx;
     } else if (cmd == "defaultfocus") {
       ss >> cur().default_focus;
     } else if (cmd == "focus") {
@@ -213,7 +255,13 @@ bool LoadScene(const fs::path& file, Scene& s) {
       ss >> o.obj;
       for (float& v : o.rgba) ss >> v;
       for (float& v : o.c) ss >> v;
-      if (ss && o.obj >= 0) fr->objs.push_back(o);
+      if (ss && o.obj >= 0) {
+        float e[14] = {};
+        int n = 0;
+        while (n < 14 && ss >> e[n]) ++n;
+        if (n >= 11) { o.has_e = true; std::copy(e, e + 14, o.e); }
+        fr->objs.push_back(o);
+      }
     }
   }
   s.tex.resize(s.tex_files.size());
@@ -297,6 +345,7 @@ void EnterScreen(Scene& s, Play& p, int screen, Clock::time_point now) {
   const ScreenDef& sd = s.screens[p.screen];
   p.focus = sd.focus.empty() ? -1 : std::clamp(sd.default_focus, 0, static_cast<int>(sd.focus.size()) - 1);
   p.ff.assign(sd.focus.size(), 0.f);
+  p.loff.clear();
 }
 
 void StartOutro(Play& p, int pending, Clock::time_point now) {
@@ -645,6 +694,29 @@ bool CondOk(const Obj& o) {
   return v == x;
 }
 
+// ---- listas con desplazamiento (igual que lists.js)
+float ListTarget(const ListDef& L, float off, int idx) {
+  const int c = (L.view - 1) / 2;
+  if (!L.loop) {
+    const float mx = static_cast<float>(std::max(0, L.n - L.view));
+    if (L.center) return std::clamp(static_cast<float>(idx - c), 0.f, mx);
+    if (idx < off) return static_cast<float>(idx);
+    if (idx > off + L.view - 1) return std::min(mx, static_cast<float>(idx - L.view + 1));
+    return std::clamp(off, 0.f, mx);
+  }
+  float rel = idx - off;
+  rel -= L.n * std::floor((rel - (L.view - 1) / 2.f) / L.n + 0.5f);
+  if (L.center) return off + rel - c;
+  if (rel < 0) return off + rel;
+  if (rel > L.view - 1) return off + rel - (L.view - 1);
+  return off;
+}
+float ListSlot(const ListDef& L, float off, int idx) {
+  float sl = idx - off;
+  if (L.loop) { const float lo = (L.view - 1) / 2.f - L.n / 2.f; sl -= L.n * std::floor((sl - lo) / L.n); }
+  return sl;
+}
+
 bool InQuad(const std::array<ImVec2, 4>& q, ImVec2 m) {
   int pos = 0, neg = 0;
   for (int i = 0; i < 4; ++i) {
@@ -684,6 +756,18 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
     const Obj& ob = s.objs[o.obj];
     if (!CondOk(ob)) continue;
     float rgba[4] = {o.rgba[0], o.rgba[1], o.rgba[2], o.rgba[3]};
+    // elemento de una lista: se mueve a su hueco, se desvanece fuera de la caja y se recorta a ella
+    const ListDef* lst = ob.list >= 0 && ob.list < static_cast<int>(sd.lists.size()) && ob.list < static_cast<int>(p.loff.size())
+                             ? &sd.lists[ob.list] : nullptr;
+    float list_dx = 0, list_dy = 0;
+    bool list_inside = true;
+    if (lst) {
+      const float sl = ListSlot(*lst, p.loff[ob.list], ob.litem), d = (sl - ob.litem) * lst->step * px_unit;
+      (lst->ax ? list_dy : list_dx) = d;
+      const float out = std::max(0.f, sl < 0 ? -sl : sl - (lst->view - 1));
+      rgba[3] *= lst->fade ? std::clamp(1 - out, 0.f, 1.f) : (out >= 1 ? 0.f : 1.f);
+      list_inside = out < 0.5f;
+    }
     if (ob.show_on >= 0) rgba[3] *= ob.show_on < static_cast<int>(p.ff.size()) ? p.ff[ob.show_on] : 0.f;
     // efecto de foco del boton (en pantalla, desde el centro del plano)
     float fs = 1, fdx = 0, fdy = 0;
@@ -701,10 +785,19 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
       auto oi = p.ov.find(ob.name);
       if (oi != p.ov.end()) ov = &oi->second;
     }
+    // efectos animados en el editor (linea "o"): valen si la logica no los cambia
+    auto anim = [&](const char* k, double d) -> double {
+      if (!o.has_e) return d;
+      static const std::pair<const char*, int> kMap[] = {{"glow", 0}, {"glow_alpha", 4}, {"blur", 5}, {"chroma", 6},
+                                                         {"brightness", 7}, {"saturation", 8}, {"invert", 9}, {"hue", 10},
+                                                         {"grain", 11}, {"flicker", 12}, {"shake", 13}};
+      for (const auto& [n, i] : kMap) if (std::strcmp(n, k) == 0) return o.e[i];
+      return d;
+    };
     auto num = [&](const char* k, double d) {
-      if (!ov) return d;
+      if (!ov) return anim(k, d);
       auto j = ov->find(k);
-      return j != ov->end() && j->second.numb() ? j->second.d() : d;
+      return j != ov->end() && j->second.numb() ? j->second.d() : anim(k, d);
     };
     auto text = [&](const char* k) -> const std::string* {
       if (!ov) return nullptr;
@@ -714,7 +807,10 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
     auto color = [&](const char* k, float* out) {
       const std::string* c = text(k);
       int rgb[3];
-      if (!c || !wui::ParseColor(wui::V::S(*c), rgb)) return false;
+      if (!c || !wui::ParseColor(wui::V::S(*c), rgb)) {
+        if (o.has_e && std::strcmp(k, "glow_color") == 0) { for (int i = 0; i < 3; ++i) out[i] = o.e[1 + i]; return true; }
+        return false;
+      }
       for (int i = 0; i < 3; ++i) out[i] = rgb[i] / 255.f;
       return true;
     };
@@ -724,12 +820,21 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
     }
     const float lsx = static_cast<float>(num("scale", 1) * num("sx", 1)), lsy = static_cast<float>(num("scale", 1) * num("sy", 1));
     const float rot = static_cast<float>(num("rot", 0)) * 0.0174532925f;
-    const float ldx = static_cast<float>(num("x", ob.x0) - ob.x0) * px_unit, ldy = static_cast<float>(num("y", ob.y0) - ob.y0) * px_unit;
+    const int fx_seed = static_cast<int>(std::chrono::duration<double>(Clock::now().time_since_epoch()).count() * 24.0);
+    auto rnd = [&](int salt) {
+      uint32_t h = static_cast<uint32_t>(o.obj) * 2654435761u ^ static_cast<uint32_t>(fx_seed) * 2246822519u ^ static_cast<uint32_t>(salt) * 3266489917u;
+      h ^= h >> 15; h *= 2246822519u; h ^= h >> 13; h *= 3266489917u; h ^= h >> 16;
+      return (h & 0xFFFFFF) / 16777216.f;
+    };
+    const float shk = static_cast<float>(num("shake", 0)) * px_unit;
+    const float ldx = static_cast<float>(num("x", ob.x0) - ob.x0) * px_unit + (shk > 0 ? (rnd(2) * 2 - 1) * shk : 0.f) + list_dx;
+    const float ldy = static_cast<float>(num("y", ob.y0) - ob.y0) * px_unit + (shk > 0 ? (rnd(3) * 2 - 1) * shk : 0.f) + list_dy;
     rgba[3] *= static_cast<float>(std::clamp(num("alpha", 1), 0.0, 1.0));
+    if (const float fl = static_cast<float>(std::clamp(num("flicker", 0), 0.0, 1.0)); fl > 0) rgba[3] *= 1 - fl * rnd(1);
     {
       float tint[3] = {1, 1, 1};
       color("tint", tint);
-      const float br = static_cast<float>(std::max(0.0, num("brightness", 1)));
+      const float br = static_cast<float>(std::clamp(num("brightness", 1), 0.0, 1.0));   // > 1: variante clara
       for (int k = 0; k < 3; ++k) rgba[k] *= tint[k] * br;
     }
     const float cs = std::cos(rot), sn = std::sin(rot);
@@ -743,7 +848,7 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
     float half = 1;   // medio tamano en pantalla (para crecer en px)
     if (all) half = std::max(1.f, (std::hypot(corner[1].x - corner[0].x, corner[1].y - corner[0].y) +
                                    std::hypot(corner[3].x - corner[0].x, corner[3].y - corner[0].y)) / 4);
-    const bool moved = all && (fs != 1 || fdx != 0 || fdy != 0 || ov);
+    const bool moved = all && (fs != 1 || fdx != 0 || fdy != 0 || ov || ldx != 0 || ldy != 0);
     // pantalla -> pantalla: escala y giro de la logica, efecto de foco, desplazamientos (y crecer `grow` px)
     auto fx = [&](ImVec2 v, ImVec2 off = ImVec2(0, 0), float grow = 0) {
       if (!moved && grow == 0 && off.x == 0 && off.y == 0) return v;
@@ -754,12 +859,21 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
     };
     if (all) {
       const std::array<ImVec2, 4> q = {fx(corner[0]), fx(corner[1]), fx(corner[2]), fx(corner[3])};
-      if (fo) p.hit.push_back({ob.focus, q});
+      if (fo && list_inside) p.hit.push_back({ob.focus, q});
       std::array<ImVec2, 4> ed;
       for (int k = 0; k < 4; ++k) ed[k] = ImVec2((q[k].x - r.x) / px_unit, (q[k].y - r.y) / px_unit);
       p.quads[o.obj] = ed;
     }
     if (rgba[3] <= 0.002f) continue;
+    struct ClipGuard {
+      ImDrawList* dl = nullptr;
+      ~ClipGuard() { if (dl) dl->PopClipRect(); }
+    } clip_guard;
+    if (lst && lst->clip) {
+      dl->PushClipRect(ImVec2(r.x + lst->box[0] * px_unit, r.y + lst->box[1] * px_unit),
+                       ImVec2(r.x + lst->box[2] * px_unit, r.y + lst->box[3] * px_unit), true);
+      clip_guard.dl = dl;
+    }
     auto get_tex = [&](int ti) -> ImTextureID {
       if (ti < 0 || ti >= static_cast<int>(s.tex_files.size())) return ImTextureID{};
       if (!s.tex_tried[ti] && drawer) {
@@ -775,6 +889,70 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
         if (!s.tex[ti]) TRACE("[UI3D] no se pudo cargar la imagen " << s.tex_files[ti]);
       }
       return s.tex[ti] ? reinterpret_cast<ImTextureID>(s.tex[ti].get()) : ImTextureID{};
+    };
+    // variante de la textura para un filtro: 1 gris, 2 invertida, 3 el doble de clara, 4..8 tono +60..+300 grados
+    // (matrices como los filtros CSS del editor: saturate, invert, brightness, hue-rotate)
+    auto get_var = [&](int tix, int kind) -> ImTextureID {
+      if (tix < 0 || tix >= static_cast<int>(s.tex_files.size()) || !drawer) return ImTextureID{};
+      const int key = tix * 1024 + kind;
+      if (!s.var_tried.count(key)) {
+        s.var_tried.insert(key);
+        std::ifstream f(s.dir / s.tex_files[tix], std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        int w = 0, h = 0;
+        auto data = rex::ui::DecodeImageRGBA(bytes.data(), bytes.size(), w, h);
+        if (!data.empty() && w > 0 && h > 0) {
+          float m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+          float add = 0, mul = 1;
+          if (kind == 1) {
+            const float L[3] = {0.2126f, 0.7152f, 0.0722f};
+            for (int rr = 0; rr < 3; ++rr) for (int cc = 0; cc < 3; ++cc) m[rr * 3 + cc] = L[cc];
+          } else if (kind == 2) {
+            for (float& v : m) v = 0;
+            m[0] = m[4] = m[8] = -1;
+            add = 1;
+          } else if (kind == 3) {
+            mul = 2;
+          } else if (kind >= 4 && kind <= 8) {
+            const float a = (kind - 3) * 60.f * 0.0174532925f, c = std::cos(a), sn = std::sin(a);
+            const float hm[9] = {0.213f + c * 0.787f - sn * 0.213f, 0.715f - c * 0.715f - sn * 0.715f, 0.072f - c * 0.072f + sn * 0.928f,
+                                 0.213f - c * 0.213f + sn * 0.143f, 0.715f + c * 0.285f + sn * 0.140f, 0.072f - c * 0.072f - sn * 0.283f,
+                                 0.213f - c * 0.213f - sn * 0.787f, 0.715f - c * 0.715f + sn * 0.715f, 0.072f + c * 0.928f + sn * 0.072f};
+            std::copy(hm, hm + 9, m);
+          }
+          if (kind >= 32 && kind < 112) {
+            // 32..47 premultiplicada (sumar, trama, aclarar), 64..79 hacia blanco (multiplicar, oscurecer): opacidad
+            // (kind & 15) / 15; 96..99 grano (ruido gris con la forma de la capa)
+            const float lv = (kind & 15) / 15.f;
+            uint32_t rs = 0x9E3779B9u * static_cast<uint32_t>(kind + 1);
+            for (size_t i = 0; i + 3 < data.size(); i += 4) {
+              const float a = data[i + 3] / 255.f;
+              for (int k = 0; k < 3; ++k) {
+                const float c = data[i + k] / 255.f;
+                float v = c;
+                if (kind < 48) v = c * a * lv;
+                else if (kind < 80) v = 1 - (1 - c) * a * lv;
+                else {
+                  if (k == 0) { rs ^= rs << 13; rs ^= rs >> 17; rs ^= rs << 5; }
+                  v = (rs & 0xFF) / 255.f;
+                }
+                data[i + k] = static_cast<uint8_t>(std::clamp(v, 0.f, 1.f) * 255.f + 0.5f);
+              }
+            }
+          }
+          if (!(kind >= 32 && kind < 112)) for (size_t i = 0; i + 3 < data.size(); i += 4) {
+            const float cr = data[i] / 255.f, cg = data[i + 1] / 255.f, cb = data[i + 2] / 255.f;
+            for (int k = 0; k < 3; ++k) {
+              const float v = (m[k * 3] * cr + m[k * 3 + 1] * cg + m[k * 3 + 2] * cb) * mul + add;
+              data[i + k] = static_cast<uint8_t>(std::clamp(v, 0.f, 1.f) * 255.f + 0.5f);
+            }
+          }
+          s.var[key] = drawer->CreateTexture(static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+                                             rex::ui::ImmediateTextureFilter::kLinear, false, data.data());
+        }
+      }
+      auto vi = s.var.find(key);
+      return vi != s.var.end() && vi->second ? reinterpret_cast<ImTextureID>(vi->second.get()) : ImTextureID{};
     };
     int ti = ob.tex;
     if (const std::string* img = text("image"); img && !img->empty()) {   // otra imagen de la interfaz
@@ -804,7 +982,7 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
       }
     };
     // el plano (o su texto nuevo) con un desplazamiento, crecido `grow` px y con un color
-    auto plane = [&](ImVec2 off, float grow, ImU32 col) {
+    auto plane_t = [&](ImTextureID t, ImVec2 off, float grow, ImU32 col) {
       if (new_text) {
         ImFont* font = ImGui::GetFont();
         const float size = std::max(6.f, ob.h0 * 0.55f * px_unit * lsy * fs * (1 + grow / half));
@@ -824,11 +1002,12 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
           for (int k = 0; k < 4 && ok; ++k) ok = pj(w[k], q[k], dep);
           if (!ok) continue;
           for (auto& v : q) v = fx(v, off, grow);
-          if (tex) dl->AddImageQuad(tex, q[0], q[1], q[2], q[3], ImVec2(u0, v0), ImVec2(u1, v0), ImVec2(u1, v1), ImVec2(u0, v1), col);
+          if (t) dl->AddImageQuad(t, q[0], q[1], q[2], q[3], ImVec2(u0, v0), ImVec2(u1, v0), ImVec2(u1, v1), ImVec2(u0, v1), col);
           else dl->AddQuadFilled(q[0], q[1], q[2], q[3], col);
         }
       }
     };
+    auto plane = [&](ImVec2 off, float grow, ImU32 col) { plane_t(tex, off, grow, col); };
     auto tinted = [&](const float* c3, float a) {
       const float c[4] = {c3[0], c3[1], c3[2], std::clamp(a, 0.f, 1.f)};
       return Col(c);
@@ -836,7 +1015,7 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
     static const float kDir[8][2] = {{1, 0}, {0.7071f, 0.7071f}, {0, 1}, {-0.7071f, 0.7071f},
                                      {-1, 0}, {-0.7071f, -0.7071f}, {0, -1}, {0.7071f, -0.7071f}};
     // sombra: copias desplazadas y repartidas en un circulo del tamano del desenfoque
-    if (const float sh = static_cast<float>(num("shadow", 0)); ov && sh > 0) {
+    if (const float sh = static_cast<float>(num("shadow", 0)); sh > 0) {
       float c[3] = {0, 0, 0};
       color("shadow_color", c);
       const ImVec2 base(static_cast<float>(num("shadow_x", 4)) * px_unit, static_cast<float>(num("shadow_y", 4)) * px_unit);
@@ -846,7 +1025,7 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
       for (const auto& d : kDir) plane(ImVec2(base.x + d[0] * rad, base.y + d[1] * rad), 0, tinted(c, a * 0.12f));
     }
     // resplandor: copias crecidas del color del resplandor, cada vez mas tenues
-    if (const float gl = static_cast<float>(num("glow", 0)); ov && gl > 0) {
+    if (const float gl = static_cast<float>(num("glow", 0)); gl > 0) {
       float c[3] = {1, 1, 1};
       color("glow_color", c);
       const float a = static_cast<float>(num("glow_alpha", 1)) * rgba[3];
@@ -854,19 +1033,61 @@ void DrawScene(ImDrawList* dl, const ImVec4& r, Scene& s, Play& p, const Frame& 
       for (int k = kRings; k >= 1; --k) plane(ImVec2(0, 0), gl * px_unit * k / kRings, tinted(c, a * 0.45f / k));
     }
     // contorno: 8 copias solidas desplazadas el grosor
-    if (const float ol = static_cast<float>(num("outline", 0)); ov && ol > 0) {
+    if (const float ol = static_cast<float>(num("outline", 0)); ol > 0) {
       float c[3] = {1, 1, 1};
       color("outline_color", c);
       for (const auto& d : kDir) plane(ImVec2(d[0] * ol * px_unit, d[1] * ol * px_unit), 0, tinted(c, rgba[3]));
     }
+    // aberracion cromatica: copias roja y azul desplazadas a los lados (bordes de color, como en el editor)
+    if (const float ch = static_cast<float>(num("chroma", 0)); ch > 0) {
+      const float red[3] = {1, 0, 0}, blue[3] = {0, 0.35f, 1};
+      plane(ImVec2(-ch * px_unit, 0), 0, tinted(red, rgba[3] * 0.55f));
+      plane(ImVec2(ch * px_unit, 0), 0, tinted(blue, rgba[3] * 0.55f));
+    }
+    // filtros: la capa (girada de tono) y encima, mezcladas, sus variantes gris, invertida y clara
+    const float hue = static_cast<float>(std::fmod(std::fmod(num("hue", 0), 360.0) + 360.0, 360.0));
+    const float sat = static_cast<float>(std::clamp(num("saturation", 1), 0.0, 1.0));
+    const float inv = static_cast<float>(std::clamp(num("invert", 0), 0.0, 1.0));
+    const float brt = static_cast<float>(std::clamp(num("brightness", 1) - 1, 0.0, 1.0));
+    const bool filt = tex && !new_text && (hue > 0.01f || sat < 0.999f || inv > 0.001f || brt > 0.001f);
+    const int bmode = tex && !new_text ? ob.blend : 0;
+    auto body = [&](ImVec2 off, float amul) {
+      if (bmode) {   // modo de fusion: variante preparada y pipeline del SDK (opacidad en 16 niveles)
+        const int q = static_cast<int>(std::lround(std::clamp(rgba[3] * amul, 0.f, 1.f) * 15));
+        if (q <= 0) return;
+        const bool white = bmode == rex::ui::kBlendMultiply || bmode == rex::ui::kBlendDarken;
+        ImTextureID t = get_var(ti, (white ? 64 : 32) + q);
+        if (!t) { plane(off, 0, tinted(rgba, rgba[3] * amul)); return; }
+        const float one[3] = {1, 1, 1};
+        dl->AddCallback(rex::ui::ImGuiBlendCallback, reinterpret_cast<void*>(static_cast<intptr_t>(bmode)));
+        plane_t(t, off, 0, tinted(white ? one : rgba, 1));
+        dl->AddCallback(rex::ui::ImGuiBlendCallback, reinterpret_cast<void*>(static_cast<intptr_t>(0)));
+        return;
+      }
+      if (!filt) { plane(off, 0, tinted(rgba, rgba[3] * amul)); return; }
+      const int hk = static_cast<int>(hue / 60.f) % 6;
+      const float hf = hue / 60.f - std::floor(hue / 60.f);
+      auto hv = [&](int k) { k %= 6; ImTextureID t = k ? get_var(ti, 3 + k) : tex; return t ? t : tex; };
+      plane_t(hv(hk), off, 0, tinted(rgba, rgba[3] * amul));
+      if (hf > 0.01f) plane_t(hv(hk + 1), off, 0, tinted(rgba, rgba[3] * amul * hf));
+      if (sat < 0.999f) if (ImTextureID t = get_var(ti, 1)) plane_t(t, off, 0, tinted(rgba, rgba[3] * amul * (1 - sat)));
+      if (inv > 0.001f) if (ImTextureID t = get_var(ti, 2)) plane_t(t, off, 0, tinted(rgba, rgba[3] * amul * inv));
+      if (brt > 0.001f) if (ImTextureID t = get_var(ti, 3)) plane_t(t, off, 0, tinted(rgba, rgba[3] * amul * brt));
+    };
     // la capa; con desenfoque, repartida en copias tenues alrededor
-    const ImU32 col = Col(rgba);
-    if (const float bl = static_cast<float>(num("blur", 0)); ov && bl > 0.25f) {
+    if (const float bl = static_cast<float>(num("blur", 0)); bl > 0.25f) {
       const float rad = bl * px_unit * 0.5f;
-      plane(ImVec2(0, 0), 0, tinted(rgba, rgba[3] * 0.3f));
-      for (const auto& d : kDir) plane(ImVec2(d[0] * rad, d[1] * rad), 0, tinted(rgba, rgba[3] * 0.16f));
+      body(ImVec2(0, 0), 0.3f);
+      for (const auto& d : kDir) body(ImVec2(d[0] * rad, d[1] * rad), 0.16f);
     } else {
-      plane(ImVec2(0, 0), 0, col);
+      body(ImVec2(0, 0), 1);
+    }
+    // grano: ruido gris con la forma de la capa, encima; cambia 24 veces por segundo
+    if (const float gr = static_cast<float>(std::clamp(num("grain", 0), 0.0, 1.0)); gr > 0 && tex && !new_text) {
+      if (ImTextureID t = get_var(ti, 96 + (fx_seed & 3))) {
+        const float one[3] = {1, 1, 1};
+        plane_t(t, ImVec2(0, 0), 0, tinted(one, rgba[3] * gr));
+      }
     }
   }
 }
@@ -919,6 +1140,7 @@ void OnLogicFrame(uint8_t* base) {
       const int b = ev % 100;
       if (b >= static_cast<int>(sd.focus.size()) || (p.mode != Mode::kIntro && p.mode != Mode::kLoop)) continue;
       if (ev >= 200 && p.locked) continue;
+      if (ev >= 300) { if (b != p.focus) { p.focus = b; if (sd.focus[b].sound) Sfx("scrolldown"); } continue; }   // rueda
       if (ev >= 200) { p.focus = b; p.clicks.push_back(sd.focus[b].obj); Input(*s, p, kChoose, base, now); }
       else if (b != p.focus) { p.focus = b; if (sd.focus[b].sound) Sfx("scrolldown"); }
     }
@@ -965,6 +1187,34 @@ void Ui3dOverlay::OnDraw(ImGuiIO& io) {
     for (size_t i = 0; i < p.ff.size(); ++i) {
       const float target = static_cast<int>(i) == p.focus && p.mode != Mode::kOutro ? 1.f : 0.f;
       p.ff[i] += (target - p.ff[i]) * std::min(1.f, dt * 14.f);
+    }
+    if (p.loff.size() != sd.lists.size()) {
+      p.loff.resize(sd.lists.size());
+      for (size_t li = 0; li < sd.lists.size(); ++li) p.loff[li] = sd.lists[li].start;
+    }
+    for (size_t li = 0; li < sd.lists.size(); ++li) {
+      const ListDef& L = sd.lists[li];
+      int idx = -1;
+      for (int i = 0; i < L.n && idx < 0; ++i) if (L.item_focus[i] >= 0 && L.item_focus[i] == p.focus) idx = i;
+      const float off = p.loff[li], to = idx >= 0 ? ListTarget(L, off, idx) : off;
+      p.loff[li] = std::abs(to - off) < 1e-3f ? to : off + (to - off) * std::min(1.f, dt * 12.f);
+    }
+    if (io.MouseWheel != 0 && !io.WantCaptureMouse && io.MousePos.x > -1000) {
+      const float mx = (io.MousePos.x - r.x) * 1280.f / r.z, my = (io.MousePos.y - r.y) * 1280.f / r.z;
+      for (const ListDef& L : sd.lists) {
+        if (!L.wheel || mx < L.box[0] || mx > L.box[2] || my < L.box[1] || my > L.box[3]) continue;
+        bool in = false;
+        int first = -1;
+        for (int f : L.item_focus) { in = in || (f >= 0 && f == p.focus); if (first < 0) first = f; }
+        int to = -1;
+        if (!in) to = first;
+        else if (p.focus >= 0 && p.focus < static_cast<int>(sd.focus.size())) {
+          const int* nb = sd.focus[p.focus].nb;
+          to = L.ax ? (io.MouseWheel < 0 ? nb[1] : nb[0]) : (io.MouseWheel < 0 ? nb[3] : nb[2]);
+        }
+        if (to >= 0 && to < 100) p.mouse_events.push_back(300 + to);
+        break;
+      }
     }
     DrawScene(dl, r, *s, p, *fr, drawer);
     // raton para la logica, en px del editor

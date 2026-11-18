@@ -16,7 +16,7 @@ if str(WUI) not in sys.path:
 import wui  # noqa: E402
 
 
-_KIND = {"project": "proyecto", "screen": "pantalla", "layer": "capa"}
+_KIND = {"anims": "generado", "project": "proyecto", "screen": "pantalla", "layer": "capa"}
 
 
 def _layer_name(l: dict) -> str:
@@ -26,7 +26,9 @@ def _layer_name(l: dict) -> str:
 def parts(proj: dict) -> list[tuple[str, str, str]]:
     """(tipo, titulo, codigo): proyecto, y por pantalla la pantalla y sus capas con codigo propio
     (igual que web/src/uiedit/scripts.js)"""
-    out = [("project", "Proyecto", ((proj.get("logic") or {}).get("source") or "").strip("﻿"))]
+    lg = proj.get("logic") or {}
+    out = [("anims", "Animaciones", lg.get("anims") or ""),     # generado por el editor (web/src/uiedit/anims.js)
+           ("project", "Proyecto", (lg.get("source") or "").strip("﻿"))]
     for s in proj.get("screens") or []:
         out.append(("screen", s.get("name") or "", (s.get("logic") or {}).get("source") or ""))
         for l in s.get("layers") or []:

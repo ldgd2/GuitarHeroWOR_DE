@@ -140,10 +140,10 @@ def load_library(name: str) -> tuple[dict, dict, dict[str, bytes]]:
 
 
 def extract_to_work(kind: str, name: str, assets: dict[str, bytes]) -> Path:
-    """Recursos del archivo -> carpeta de trabajo limpia."""
+    """Recursos del archivo -> carpeta de trabajo. No se borra lo que ya hay: puede haber imagenes importadas
+    que aun no se han guardado en el archivo (otra pestana, o abrir de nuevo antes de guardar). Al guardar solo
+    se empaquetan las que usa el proyecto, asi que lo que sobre aqui no llega al .desp."""
     d = workdir(kind, name)
-    shutil.rmtree(d, ignore_errors=True)
-    d.mkdir(parents=True, exist_ok=True)
     for rel, data in assets.items():
         p = d / rel
         p.parent.mkdir(parents=True, exist_ok=True)

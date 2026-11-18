@@ -17,6 +17,8 @@
 #include "de/edfx.hpp"
 #include "de/ui3d.hpp"
 #include "de/render_sandbox.hpp"
+#include "nativegfx/hybrid/hybrid_pipeline.hpp"
+#include "nativegfx/full/full_pipeline.hpp"
 #include "diagnostics/stubs.hpp"
 #include "generated/re_wor_init.h"
 #include "generated/re_wor_pch.h"
@@ -164,6 +166,10 @@ void ReWorApp::OnPreSetup(rex::RuntimeConfig& config) {
   re_wor::de::ApplyDisplayOptions(gfx);
   rex::cvar::SetFlagByName("d3d12_readback_resolve", "false");
   rex::cvar::SetFlagByName("d3d12_submit_on_primary_buffer_end", "true");
+  rex::cvar::SetFlagByName("d3d12_allow_variable_refresh_rate_and_tearing", "true");
+  rex::cvar::SetFlagByName("d3d12_queue_priority", "1");
+  rex::cvar::SetFlagByName("vulkan_allow_present_mode_mailbox", "true");
+  rex::cvar::SetFlagByName("vulkan_allow_present_mode_immediate", "true");
 }
 
 void ReWorApp::OnPostSetup() {
@@ -246,6 +252,8 @@ void ReWorApp::OnPostSetup() {
   }
 
   uint8_t* base = runtime()->virtual_membase();
+  re_wor::nativegfx::HybridPipeline::Instance().SetGuestMemoryBase(base);
+  re_wor::nativegfx::FullPipeline::Instance().SetGuestMemoryBase(base);
 
   // Rellenar entradas nulas en la tabla de despacho
   re_wor::hooks::init::fill_dispatch_table(base);
@@ -341,6 +349,71 @@ void ReWorApp::OnCreateDialogs(rex::ui::ImGuiDrawer* imgui) {
       SendMessageA(hwnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
       SendMessageA(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
     }
+
+    // Inicializar renderizado nativo (Fase 3: Hibrido / Fase 4: Completo en D3D11 / D3D12 / Vulkan)
+    const auto& gfx = re_wor::de::Get().graphics;
+    const char* native_env = std::getenv("REWOR_NATIVE_GFX");
+    bool native_active = (gfx.pipeline_mode == "full" || gfx.pipeline_mode == "hybrid") ||
+                         (native_env && (std::strcmp(native_env, "1") == 0 || std::strcmp(native_env, "true") == 0));
+    if (native_active) {
+      auto backend = re_wor::nativegfx::GraphicsBackendType::D3D11;
+      if (gfx.backend == "d3d12") {
+        TRACE("[NativeGFX] Backend DirectX 12 en desarrollo preliminar (faltan PSOs). Usando DirectX 11 nativo...");
+        backend = re_wor::nativegfx::GraphicsBackendType::D3D11;
+      } else if (gfx.backend == "vulkan") {
+        TRACE("[NativeGFX] Backend Vulkan en desarrollo preliminar (faltan PSOs). Usando DirectX 11 nativo...");
+        backend = re_wor::nativegfx::GraphicsBackendType::D3D11;
+      }
+      uint32_t width = 1920, height = 1080;
+      const std::string& res = gfx.resolution;
+      if (res == "720p") { width = 1280; height = 720; }
+      else if (res == "768p" || res == "1366x768") { width = 1366; height = 768; }
+      else if (res == "900p" || res == "1600x900") { width = 1600; height = 900; }
+      else if (res == "1080p" || res == "1920x1080") { width = 1920; height = 1080; }
+      else if (res == "1200p" || res == "1920x1200") { width = 1920; height = 1200; }
+      else if (res == "2560x1080") { width = 2560; height = 1080; }
+      else if (res == "1440p" || res == "2560x1440") { width = 2560; height = 1440; }
+      else if (res == "2560x1600") { width = 2560; height = 1600; }
+      else if (res == "3440x1440") { width = 3440; height = 1440; }
+      else if (res == "4k" || res == "3840x2160") { width = 3840; height = 2160; }
+      else {
+        auto x_pos = res.find('x');
+        bool parsed = false;
+        if (x_pos != std::string::npos && x_pos > 0 && x_pos + 1 < res.size()) {
+          try {
+            uint32_t rw = std::stoul(res.substr(0, x_pos));
+            uint32_t rh = std::stoul(res.substr(x_pos + 1));
+            if (rw >= 640 && rh >= 480) { width = rw; height = rh; parsed = true; }
+          } catch (...) {}
+        }
+        if (!parsed) {
+          uint32_t phys_w = window()->GetActualPhysicalWidth();
+          uint32_t phys_h = window()->GetActualPhysicalHeight();
+          if (phys_w > 0 && phys_h > 0) {
+            width = phys_w;
+            height = phys_h;
+          }
+        }
+      }
+
+      if (gfx.pipeline_mode == "hybrid") {
+        re_wor::nativegfx::HybridPipeline::Instance().Initialize(hwnd, backend, width, height);
+        TRACE("[NativeGFX] Pipeline hibrido (Fase 3) inicializado con backend " << gfx.backend << " (" << width << "x" << height << ")");
+      } else {
+        re_wor::nativegfx::FullPipeline::Instance().Initialize(hwnd, backend, width, height);
+        if (auto* ren = re_wor::nativegfx::FullPipeline::Instance().GetRenderer()) {
+          ren->SetVSync(gfx.vsync);
+          uint32_t aniso = 1;
+          if (gfx.aniso >= 2 && gfx.aniso <= 16) aniso = static_cast<uint32_t>(gfx.aniso);
+          else if (gfx.aniso == 1) aniso = 2;
+          else if (gfx.aniso == 2) aniso = 4;
+          else if (gfx.aniso == 3) aniso = 8;
+          else if (gfx.aniso == 4) aniso = 16;
+          ren->SetAnisotropy(aniso);
+        }
+        TRACE("[NativeGFX] Pipeline nativo completo (Fase 4) inicializado con backend " << gfx.backend << " (" << width << "x" << height << ")");
+      }
+    }
   }
 #endif
   // Modo de pantalla elegido en Options > Graphics (0 ventana, 1 sin bordes, 2 exclusiva).
@@ -358,6 +431,8 @@ void ReWorApp::OnGuestThreadExit(rex::system::XThread* thread) {
 
 void ReWorApp::OnShutdown() {
   TRACE("[ReWorApp::OnShutdown] Application shutting down");
+  re_wor::nativegfx::FullPipeline::Instance().Shutdown();
+  re_wor::nativegfx::HybridPipeline::Instance().Shutdown();
   re_wor::core::flush_trace();
   re_wor::core::disable_high_resolution_timer();
 }

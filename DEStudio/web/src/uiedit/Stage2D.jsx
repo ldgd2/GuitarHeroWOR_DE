@@ -3,20 +3,29 @@
 // por recuadro, ajuste magnetico (bordes y centros del lienzo, guias y otras capas) y herramientas de dibujo:
 // texto (clic = texto de punto, arrastrar = caja), formas (rectangulo, elipse, poligono, estrella, linea) y pluma.
 // En 2.5D cada capa se proyecta con la camara (lo mismo que hace el exportador).
+import { listsOf } from './lists.js';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { LayerCanvas } from '../studio/LayerCanvas.jsx';
 import { fontCss, textSize } from '../studio/raster.js';
-import { H, W, newLayer, setProp, stateAt } from './model.js';
+import { H, W, newLayer, setProp, stateAt, BLEND_CSS, condOk } from './model.js';
 import { bboxOf, corners, fitText, hits, itemBox, layerUrl, layout, screenToWorldDelta, unionBox } from './view2d.js';
-import { lookCss } from './logic.js';
+import { lookCss, liveCss } from './logic.js';
 
 const HANDLES = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
 const CURSOR = { '-1,-1': 'nwse-resize', '1,1': 'nwse-resize', '1,-1': 'nesw-resize', '-1,1': 'nesw-resize', '0,-1': 'ns-resize', '0,1': 'ns-resize', '-1,0': 'ew-resize', '1,0': 'ew-resize' };
 const SHAPE_TOOLS = { rect: 'rect', ellipse: 'ellipse', polygon: 'polygon', star: 'star', line: 'line' };
 const RULER = 20;
 
+// numero 0..1 repetible por capa y fotograma (grano, parpadeo, temblor)
+function rnd(id, seed, salt) {
+  let h = 2166136261 ^ salt;
+  for (const ch of String(id) + ':' + seed) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995); h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
 export function Stage2D({ proj, doc, mode, clip, t, sel, setSel, tool, setTool, edit, live, opts, view, setView, refImg, refAlpha,
-  editingText, setEditingText, overrides, readOnly, onPick }) {
+  editingText, setEditingText, overrides, readOnly, onPick, onListWheel }) {
   const wrap = useRef(null);
   const [size, setSize] = useState({ w: 800, h: 500 });
   const [drag, setDrag] = useState(null);          // estado visual del gesto en curso (recuadro, forma nueva, guias)
@@ -24,7 +33,10 @@ export function Stage2D({ proj, doc, mode, clip, t, sel, setSel, tool, setTool, 
   const [space, setSpace] = useState(false);
   const [hoverGuide, setHoverGuide] = useState(null);
   const urlOf = l => layerUrl(proj, l);
-  const items = useMemo(() => layout(doc, mode, clip, t), [doc, mode, clip, t]);
+  // al disenar, una capa con condicion se ve si se cumple con el valor de diseno de su variable (Interaccion)
+  const items = useMemo(() => layout(doc, mode, clip, t).filter(it => readOnly || !it.l.showIf || condOk(it.l.showIf, proj?.designVars)),
+    [doc, mode, clip, t, readOnly, proj?.designVars]);
+  const listBoxes = useMemo(() => readOnly ? [] : listsOf(doc), [doc, readOnly]);
   const z = view.z;
   const toS = (x, y) => [view.x + x * z, view.y + y * z];                       // mundo -> pantalla (px del contenedor)
   const toW = (cx, cy) => [(cx - view.x) / z, (cy - view.y) / z];
@@ -65,6 +77,10 @@ export function Stage2D({ proj, doc, mode, clip, t, sel, setSel, tool, setTool, 
   const onWheel = e => {
     const r = wrap.current.getBoundingClientRect();
     const cx = e.clientX - r.left, cy = e.clientY - r.top;
+    if (onListWheel && !e.ctrlKey && Math.abs(e.deltaY) > 0) {   // vista previa: la rueda mueve las listas
+      const [wx, wy] = toW(cx, cy);
+      if (onListWheel(wx, wy, Math.sign(e.deltaY))) return;
+    }
     if (e.ctrlKey || e.altKey || readOnly) {
       const nz = Math.max(0.05, Math.min(32, z * Math.pow(1.0015, -e.deltaY)));
       const [wx, wy] = toW(cx, cy);
@@ -109,11 +125,20 @@ export function Stage2D({ proj, doc, mode, clip, t, sel, setSel, tool, setTool, 
     follow(ev => setView({ ...v0, x: v0.x + ev.clientX - x0, y: v0.y + ev.clientY - y0, fit: false }));
   };
   const selItems = () => items.filter(it => sel.includes(it.l.id));
+  // vista previa: lo de encima en (wx, wy) con los desplazamientos y recortes de la interfaz en marcha
+  const hitPreview = (wx, wy) => [...items].reverse().find(it => {
+    if (it.group) return false;
+    const ov = overrides?.(it);
+    if (ov?.hide || (ov?.alpha ?? 1) < 0.05) return false;
+    const c = ov?.clip;
+    if (c && (wx < c.x0 || wx > c.x1 || wy < c.y0 || wy > c.y1)) return false;
+    return hits(it, wx - (ov?.fx?.dx || 0), wy - (ov?.fx?.dy || 0));
+  });
 
   const onDown = e => {
     if (readOnly) {
       const [cx, cy] = pointer(e); const [wx, wy] = toW(cx, cy);
-      const hit = [...items].reverse().find(it => !it.group && hits(it, wx, wy));
+      const hit = hitPreview(wx, wy);
       onPick?.(hit?.l.id || null, 'click');
       return;
     }
@@ -408,7 +433,7 @@ export function Stage2D({ proj, doc, mode, clip, t, sel, setSel, tool, setTool, 
   const onMoveHover = e => {
     if (readOnly) {
       const [cx, cy] = pointer(e); const [wx, wy] = toW(cx, cy);
-      const hit = [...items].reverse().find(it => !it.group && hits(it, wx, wy));
+      const hit = hitPreview(wx, wy);
       if (hit) onPick?.(hit.l.id, 'hover');
       return;
     }
@@ -433,7 +458,7 @@ export function Stage2D({ proj, doc, mode, clip, t, sel, setSel, tool, setTool, 
   return (
     <section className={'ue-view' + (readOnly ? ' ro' : '')} ref={wrap} style={{ cursor }}
       onPointerDown={onDown} onDoubleClick={onDouble} onPointerMove={onMoveHover} onContextMenu={e => e.preventDefault()}>
-      <div className={'ue-board bg-' + (opts.bg || 'dark')} style={{ left: view.x, top: view.y, width: W * z, height: H * z }}>
+      <div className={'ue-board bg-' + (opts.bg || 'dark') + (!readOnly && opts.outside !== false ? ' open' : '')} style={{ left: view.x, top: view.y, width: W * z, height: H * z }}>
         {refImg && <img className="ue-ref" src={refImg} alt="" style={{ opacity: refAlpha }} />}
         {items.map(it => {
           if (it.group || it.l.id === editingText) return null;
@@ -453,26 +478,48 @@ export function Stage2D({ proj, doc, mode, clip, t, sel, setSel, tool, setTool, 
           }
           const lv = vm?.text != null && l.type === 'text' ? { ...l, text: { ...l.text, value: vm.text } } : l;
           const css = vm ? lookCss(vm, z) : null;
+          // grano, parpadeo y temblor: cambian 24 veces por segundo (como en el juego)
+          const seed = Math.floor((t || 0) * 24);
+          const flick = s.e_flicker > 0 ? 1 - s.e_flicker * rnd(l.id, seed, 1) : 1;
+          const shake = s.e_shake > 0 ? [(rnd(l.id, seed, 2) * 2 - 1) * s.e_shake * k, (rnd(l.id, seed, 3) * 2 - 1) * s.e_shake * k] : null;
+          const grainId = s.e_grain > 0 ? `gr_${l.id}` : null;
+          const filt = [liveCss(s, k), grainId && `url(#${grainId})`].filter(Boolean).join(' ') || undefined;
+          const blend = BLEND_CSS[l.blend] || undefined;
           const el = (
-            <div className="ue-layer" style={{ left: it.x * z, top: it.y * z, opacity: alpha * (vm ? vm.alpha : 1),
-              transform: `rotate(${it.rot}deg)`, transformOrigin: '0 0' }}>
+            <div className="ue-layer" style={{ left: it.x * z, top: it.y * z, opacity: alpha * (vm ? vm.alpha : 1) * flick,
+              transform: `${shake ? `translate(${shake[0]}px, ${shake[1]}px) ` : ''}rotate(${it.rot}deg)`, transformOrigin: '0 0', filter: filt,
+              mixBlendMode: !ov?.fx && !vm ? blend : undefined }}>
+              {grainId && <svg width="0" height="0" style={{ position: 'absolute' }}><filter id={grainId} x="0" y="0" width="100%" height="100%">
+                <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="1" seed={seed} result="n" />
+                <feColorMatrix in="n" type="saturate" values="0" result="g" />
+                <feComposite in="g" in2="SourceAlpha" operator="in" result="m" />
+                <feComponentTransfer in="m" result="a"><feFuncA type="linear" slope={Math.min(1, s.e_grain)} /></feComponentTransfer>
+                <feMerge><feMergeNode in="SourceGraphic" /><feMergeNode in="a" /></feMerge>
+              </filter></svg>}
               <div style={{ position: 'absolute', left: -(s.ax ?? 0.5) * s.w * k, top: -(s.ay ?? 0.5) * s.h * k, width: s.w * k, height: s.h * k,
                 clipPath: css?.clipPath }}>
                 <LayerCanvas l={lv} w={s.w} h={s.h} scale={k} tint={tint} urlOf={urlOf} />
               </div>
             </div>);
-          if (!ov?.fx && !vm) return <React.Fragment key={l.id}>{el}</React.Fragment>;
+          const cl = ov?.clip;   // caja de la lista: recorta lo que sale
+          const clipCss = cl ? `polygon(${cl.x0 * z}px ${cl.y0 * z}px, ${cl.x1 * z}px ${cl.y0 * z}px, ${cl.x1 * z}px ${cl.y1 * z}px, ${cl.x0 * z}px ${cl.y1 * z}px)` : null;
+          const clipWrap = node => clipCss ? <div key={l.id} className="ue-fxwrap" style={{ clipPath: clipCss, mixBlendMode: blend }}>{node}</div> : node;
+          if (!ov?.fx && !vm) return clipCss ? clipWrap(el) : <React.Fragment key={l.id}>{el}</React.Fragment>;
           const c = bboxOf(corners(it));
           const origin = `${(c.x0 + c.x1) / 2 * z}px ${(c.y0 + c.y1) / 2 * z}px`;
           const focusFx = ov?.fx ? `translate(${ov.fx.dx * z}px, ${ov.fx.dy * z}px) scale(${ov.fx.s})` : '';
-          return <div key={l.id} className="ue-fxwrap" style={{ transformOrigin: origin,
-            transform: [focusFx, css?.transform].filter(Boolean).join(' ') || undefined, filter: css?.filter }}>{el}</div>;
+          return clipWrap(<div key={l.id} className="ue-fxwrap" style={{ transformOrigin: origin, mixBlendMode: clipCss ? undefined : blend,
+            transform: [focusFx, css?.transform].filter(Boolean).join(' ') || undefined, filter: css?.filter }}>{el}</div>);
         })}
+        {!readOnly && opts.outside !== false && <div className="ue-outside" title="" />}
         {opts.grid && !readOnly && <div className="ue-grid" style={{ backgroundSize: `${opts.gridSize * z}px ${opts.gridSize * z}px` }} />}
       </div>
       {!readOnly && <svg className="ue-overlay" width={size.w} height={size.h}>
         {opts.guides !== false && (proj.guides?.x || []).map((v, i) => <line key={'gx' + i} className="ue-guide" x1={toS(v, 0)[0]} x2={toS(v, 0)[0]} y1={0} y2={size.h} />)}
         {opts.guides !== false && (proj.guides?.y || []).map((v, i) => <line key={'gy' + i} className="ue-guide" y1={toS(0, v)[1]} y2={toS(0, v)[1]} x1={0} x2={size.w} />)}
+        {listBoxes.map(L => { const [x0, y0] = S([L.box.x0, L.box.y0]), [x1, y1] = S([L.box.x1, L.box.y1]);
+          return <g key={'ls' + L.id} className="ue-listbox"><rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} />
+            <text x={x0 + 4} y={y0 - 5}>{`${L.name || 'Lista'}: ${L.cfg.view} de ${L.n}${L.cfg.loop ? ', infinita' : ''}`}</text></g>; })}
         {opts.showButtons && items.filter(it => it.l.ui?.focus && !it.group).map(it => <polygon key={'b' + it.l.id} className="ue-btnmark" points={poly(corners(it))} />)}
         {selBoxes.map(({ it, pts, box }) => pts
           ? <polygon key={it.l.id} className="ue-selpoly" points={poly(pts)} />

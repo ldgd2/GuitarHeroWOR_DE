@@ -25,7 +25,11 @@ export async function bakeTextures(proj, onProgress) {
     // escala mas grande que llega a tener (base, claves y foco) para que no se vea borrosa
     const grow = Math.max(1, l.base.scale || 1, maxKey(doc, l.id, 'scale'), l.ui?.focus ? l.ui.hover?.scale || 1 : 1,
       proj.mode === '3d' ? 1.5 : 1);
-    const r = rasterize(l, l.base.w, l.base.h, quality * grow, urlOf);
+    // vectoriales (SVG, textos, formas): al menos x3 (pantallas 4K), sin pasar de 4096 px de lado
+    const vector = l.type !== 'image' || l.image?.svg;
+    const want = (vector ? Math.max(quality, 3) : quality) * grow;
+    const q = Math.min(want, 4096 / Math.max(1, l.base.w, l.base.h));
+    const r = rasterize(l, l.base.w, l.base.h, q, urlOf);
     out[l.id] = { png: r.canvas.toDataURL('image/png').split(',')[1], pad: r.pad, w: l.base.w, h: l.base.h };
     onProgress?.(i + 1, jobs.length);
     await new Promise(res => setTimeout(res));

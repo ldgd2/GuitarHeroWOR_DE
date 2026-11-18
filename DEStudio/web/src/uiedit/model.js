@@ -65,6 +65,31 @@ export const SCRIPT_PRESETS = [
   ['re_ctl_open', 'Abrir Options > Controls (re-wor)'],
 ];
 export const newAction = (type = 'goto') => ({ type, screen: '', script: '', target: '', value: 1, state: '', sound: 'select', ui: '' });
+/** accion al pulsar un boton: la primera de ui.actions (o ui.action, formato anterior); la variable sale de target ($nombre) */
+export function actionOf(l) {
+  const a = l?.ui?.action || l?.ui?.actions?.[0] || {};
+  return { ...a, global: a.global || (a.target?.startsWith('$') ? a.target.slice(1) : '') };
+}
+/** variable de la condicion "mostrar segun una variable" (formato anterior: global; actual: src $nombre) */
+export const condVar = c => c?.global || (c?.src?.startsWith('$') ? c.src.slice(1) : '');
+/** se cumple la condicion "mostrar segun una variable" con estos valores (los que falten valen 0) */
+export function condOk(c, vars) {
+  const g = condVar(c);
+  if (!g) return true;
+  const v = +(vars?.[g] ?? 0) || 0, x = +c.value || 0;
+  return { '=': v === x, '!=': v !== x, '>': v > x, '<': v < x, '>=': v >= x, '<=': v <= x }[c.op || '='] ?? true;
+}
+/** variables propias de la interfaz: empiezan por re_ui_ (el exportador las declara; las demas son del juego) */
+export const ownVar = g => /^re_ui_[a-z0-9_]+$/i.test(g || '');
+/** el panel guardado al pasar una capa a codigo -> ui (acepta el formato anterior con una sola accion) */
+export function restorePanel(l) {
+  const p = l.script?.panel;
+  if (!p || !l.ui) return;
+  if (Array.isArray(p.actions)) l.ui.actions = p.actions;
+  else { const a = p.action || {}; l.ui.actions = a.type && a.type !== 'none' ? [{ ...newAction(a.type), ...a, target: a.global ? '$' + a.global : a.target || '' }] : []; }
+  delete l.ui.action;
+  if (p.hover) l.ui.hover = p.hover;
+}
 
 /** tipo de una fuente: var | global | expr | call | '' */
 export function srcKind(src) {
@@ -127,6 +152,13 @@ export function sourcesOf(proj) {
   return [...out];
 }
 
+// efectos en vivo (animables; el juego los dibuja cada fotograma, no se hornean en la imagen)
+export const LIVE_DEFAULTS = { e_glow: 0, e_glowc: [255, 200, 120], e_glowa: 1, e_blur: 0, e_chroma: 0, e_bright: 1, e_sat: 1, e_inv: 0, e_hue: 0, e_grain: 0, e_flicker: 0, e_shake: 0 };
+// modos de fusion (los dibujan el editor y el juego)
+export const BLEND_MODES = [['normal', 'Normal'], ['multiply', 'Multiplicar'], ['screen', 'Trama'], ['add', 'Sobreexponer lineal (sumar)'],
+  ['darken', 'Oscurecer'], ['lighten', 'Aclarar']];
+export const BLEND_CSS = { multiply: 'multiply', screen: 'screen', add: 'plus-lighter', darken: 'darken', lighten: 'lighten' };
+
 // propiedades animables: [clave, etiqueta, paso, min, max]
 const P = {
   x: ['x', 'X', 1], y: ['y', 'Y', 1], z: ['z', 'Z', 1], depth: ['depth', 'Profundidad', 1],
@@ -134,7 +166,14 @@ const P = {
   rx: ['rx', 'Giro X', 1], ry: ['ry', 'Giro Y', 1], rz: ['rz', 'Giro Z', 1],
   alpha: ['alpha', 'Opacidad', 0.01, 0, 1], color: ['color', 'Tinte'], fov: ['fov', 'Campo de vision', 1, 5, 170],
   zoom: ['zoom', 'Zoom', 0.01, 0.05],
+  e_glow: ['e_glow', 'Resplandor', 1, 0, 200], e_glowc: ['e_glowc', 'Color del resplandor'], e_glowa: ['e_glowa', 'Fuerza del resplandor', 0.05, 0, 1],
+  e_blur: ['e_blur', 'Desenfoque', 0.5, 0, 100], e_chroma: ['e_chroma', 'Aberracion cromatica', 0.5, 0, 60],
+  e_bright: ['e_bright', 'Brillo', 0.05, 0, 2], e_sat: ['e_sat', 'Saturacion', 0.05, 0, 1], e_inv: ['e_inv', 'Invertir', 0.05, 0, 1],
+  e_hue: ['e_hue', 'Tono', 1, -180, 180], e_grain: ['e_grain', 'Grano', 0.05, 0, 1], e_flicker: ['e_flicker', 'Parpadeo', 0.05, 0, 1],
+  e_shake: ['e_shake', 'Temblor (px)', 0.5, 0, 60],
 };
+export const LIVE_PROPS = Object.keys(LIVE_DEFAULTS).map(k => P[k]);
+export const COLOR_PROPS = new Set(['color', 'e_glowc']);
 export function propsFor(mode, type) {
   const pick = ks => ks.map(k => P[k]);
   if (type === CAM25) return pick(['x', 'y', 'zoom', 'rot']);
@@ -148,8 +187,8 @@ export function propsFor(mode, type) {
 }
 export const typesFor = mode => Object.keys(TYPES).filter(t => t !== 'camera' || mode === '3d');
 
-const BASE2D = { x: W / 2, y: H / 2, w: 200, h: 120, scale: 1, rot: 0, alpha: 1, color: [255, 255, 255], order: 10, ax: 0.5, ay: 0.5, depth: 0 };
-const BASE3D = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, w: 400, h: 225, scale: 1, alpha: 1, color: [255, 255, 255], ax: 0.5, ay: 0.5, order: 10, fov: 50 };
+const BASE2D = { x: W / 2, y: H / 2, w: 200, h: 120, scale: 1, rot: 0, alpha: 1, color: [255, 255, 255], order: 10, ax: 0.5, ay: 0.5, depth: 0, ...LIVE_DEFAULTS };
+const BASE3D = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, w: 400, h: 225, scale: 1, alpha: 1, color: [255, 255, 255], ax: 0.5, ay: 0.5, order: 10, fov: 50, ...LIVE_DEFAULTS };
 
 export const DEFAULT_TEXT = { value: 'Texto', font: 'Inter Variable', weight: 700, italic: false, px: 48, color: [255, 255, 255], align: 'center',
   spacing: 0, line: 1.15, upper: false, box: 'auto' };
