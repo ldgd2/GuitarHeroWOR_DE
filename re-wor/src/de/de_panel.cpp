@@ -1320,19 +1320,6 @@ void DePanelDialog::DrawGraphicsTab() {
 
   // ---------------------------------------------------------------- Calidad
   Section("Calidad");
-  {
-    const char* labels[] = {
-        "1.0x (Nativa 1:1 - Recomendada / Portatil fresca y rapida)",
-        "2.0x (Supersampling 2x - Alta definicion / Mas calor en GPU)",
-        "3.0x (Supersampling 3x - Ultra definicion / Mucho calor)",
-        "4.0x (Supersampling 4x - Solo PCs de gama extrema)"
-    };
-    int idx = std::clamp(g.resolution_scale, 1, 4) - 1;
-    Row("Escala de render");
-    if (ImGui::Combo("##scale", &idx, labels, 4)) { g.resolution_scale = idx + 1; changed = true; }
-    RestartTag(g.resolution_scale != b.resolution_scale);
-    Hint("En Fase 4 nativa, el juego ya se dibuja en 1080p nativo si elegiste 1080p en la seccion Pantalla. 1.0x es la opcion optima y fresca para portatiles; 2.0x realiza supersampling interno.");
-  }
   Row("Antialiasing");
   if (ImGui::Checkbox("MSAA 2x nativo##msaa", &g.msaa2x)) changed = true;
   RestartTag(g.msaa2x != b.msaa2x);
@@ -1355,6 +1342,12 @@ void DePanelDialog::DrawGraphicsTab() {
     Row("Publico");
     if (ImGui::Combo("##crowd", &g.crowd, labels, 4)) changed = true;
     Hint("Se aplica al momento durante la cancion.");
+  }
+  {
+    const char* labels[] = {"Optimizado (Alto Rendimiento / Culling)", "Medio (Balanceado)", "Alto (Original 360)", "Ultra (Sin Culling)"};
+    Row("Humo y niebla");
+    if (ImGui::Combo("##particles", &g.particles, labels, 4)) changed = true;
+    Hint("Optimiza el humo, niebla y efectos del escenario para evitar caidas en planos abiertos.");
   }
   {
     const char* labels[] = {"Bilineal (suave)", "AMD CAS (nitidez)", "AMD FSR 1 (reescalado)"};

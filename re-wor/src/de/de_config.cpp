@@ -299,6 +299,7 @@ void Load() {
       rf("grain", g.grain, 0, 1);
       rf("blur", g.blur, 0, 1);
       g.crowd = std::clamp(static_cast<int>((*gfx)["crowd"].value_or(g.crowd)), 0, 3);
+      g.particles = std::clamp(static_cast<int>((*gfx)["particles"].value_or(g.particles)), 0, 3);
       g.window_mode = std::clamp(g.window_mode, 0, 2);
       g.refresh_hz = std::clamp(g.refresh_hz, 30, 240);
     }
@@ -398,7 +399,8 @@ bool Save() {
                   {"vignette", static_cast<double>(c.graphics.vignette)},
                   {"grain", static_cast<double>(c.graphics.grain)},
                   {"blur", static_cast<double>(c.graphics.blur)},
-                  {"crowd", c.graphics.crowd}};
+                  {"crowd", c.graphics.crowd},
+                  {"particles", c.graphics.particles}};
 
   toml::table hotkeys{{"panel", c.hotkeys.panel},
                       {"fullscreen", c.hotkeys.fullscreen},

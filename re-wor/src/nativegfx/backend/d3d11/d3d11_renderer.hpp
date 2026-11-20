@@ -54,6 +54,7 @@ class D3D11Renderer : public INativeRenderer {
   D3D11StateCache state_cache_;
   D3D11ShaderCache shader_cache_;
   D3D11TextureCache texture_cache_;
+  uint64_t frame_counter_ = 0;
 
   // Buffer de constantes b0 (VS float4), b0 (PS float4), b1 (bool/loop), b2 (fetch), b3 (sys)
   Microsoft::WRL::ComPtr<ID3D11Buffer> cb_vs_c_;
@@ -73,6 +74,34 @@ class D3D11Renderer : public INativeRenderer {
   // Mascara de paginas de 64 KB subidas a guest_memory_buffer_ en el cuadro actual (512 MB = 8192 paginas = 128 uint64_t)
   uint64_t uploaded_pages_mask_[128] = {};
   std::vector<uint8_t> temp_upload_;
+
+  // Cache de versión de buffers de constantes para omitir UpdateSubresource idénticos sin coste de CPU
+  uint32_t last_cb_version_[5] = {};
+  uint32_t last_draw_fetch_version_ = 0xFFFFFFFF;
+  uint32_t last_ib_addr_ = 0;
+  uint32_t last_ib_count_ = 0;
+  IndexFormat last_ib_format_ = IndexFormat::Index16;
+
+  // Redundancy filters para estados de pipeline de D3D11
+  ID3D11BlendState* last_blend_state_ = nullptr;
+  float last_blend_factor_[4] = {0, 0, 0, 0};
+  ID3D11DepthStencilState* last_ds_state_ = nullptr;
+  uint32_t last_stencil_ref_ = 0xFFFFFFFF;
+  ID3D11RasterizerState* last_rs_state_ = nullptr;
+  ID3D11VertexShader* last_vs_ = nullptr;
+  ID3D11PixelShader* last_ps_ = nullptr;
+  D3D11_PRIMITIVE_TOPOLOGY last_topo_ = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+
+  // Filtro de redundancia para texturas y samplers
+  ID3D11ShaderResourceView* last_bound_srv_[128] = {};
+  ID3D11SamplerState* last_bound_sampler_[16] = {};
+  uint64_t last_tex_hash_[32] = {};
+  ID3D11ShaderResourceView* last_cached_srv_[32] = {};
+  ID3D11SamplerState* last_cached_smp_[32] = {};
+
+  bool guest_srv_bound_ = false;
+  ID3D11GeometryShader* last_gs_ = nullptr;
+  D3D11_RECT last_scissor_rect_ = {};
 
   bool is_frame_active_ = false;
   bool vsync_ = false;

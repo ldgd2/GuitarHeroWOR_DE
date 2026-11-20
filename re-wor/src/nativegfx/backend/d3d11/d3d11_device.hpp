@@ -24,6 +24,7 @@ class D3D11DeviceContext {
   ID3D11Device* GetDevice() const { return device_.Get(); }
   ID3D11DeviceContext* GetContext() const { return context_.Get(); }
   ID3D11RenderTargetView* GetBackBufferRTV() const { return back_buffer_rtv_.Get(); }
+  ID3D11Texture2D* GetBackBufferTexture() const { return back_buffer_texture_.Get(); }
   ID3D11DepthStencilView* GetDefaultDSV() const { return default_dsv_.Get(); }
 
   uint32_t GetWidth() const { return width_; }
@@ -41,6 +42,7 @@ class D3D11DeviceContext {
   Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
   Microsoft::WRL::ComPtr<IDXGISwapChain> swap_chain_;
   Microsoft::WRL::ComPtr<ID3D11RenderTargetView> back_buffer_rtv_;
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> back_buffer_texture_;
   Microsoft::WRL::ComPtr<ID3D11Texture2D> depth_stencil_texture_;
   Microsoft::WRL::ComPtr<ID3D11DepthStencilView> default_dsv_;
 };

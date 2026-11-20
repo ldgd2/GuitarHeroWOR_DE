@@ -19,6 +19,7 @@
 #include "de/render_sandbox.hpp"
 #include "nativegfx/hybrid/hybrid_pipeline.hpp"
 #include "nativegfx/full/full_pipeline.hpp"
+#include "nativegfx/backend/backend_factory.hpp"
 #include "diagnostics/stubs.hpp"
 #include "generated/re_wor_init.h"
 #include "generated/re_wor_pch.h"
@@ -137,10 +138,10 @@ void ReWorApp::OnPreSetup(rex::RuntimeConfig& config) {
   } else {
     rex::cvar::SetFlagByName("render_target_path_d3d12", "rtv");
   }
-  if (gfx.resolution_scale > 0) {
-    rex::cvar::SetFlagByName("draw_resolution_scale_x", std::to_string(gfx.resolution_scale));
-    rex::cvar::SetFlagByName("draw_resolution_scale_y", std::to_string(gfx.resolution_scale));
-  }
+  // La escala del emulador se fija en 1x para resolucion nativa 1:1 directa (1080p nativo sin 2K supersampling innecesario)
+  int eff_scale = 1;
+  rex::cvar::SetFlagByName("draw_resolution_scale_x", std::to_string(eff_scale));
+  rex::cvar::SetFlagByName("draw_resolution_scale_y", std::to_string(eff_scale));
   int cache_mb = gfx.texture_cache_mb > 0 ? gfx.texture_cache_mb : 1024;
   rex::cvar::SetFlagByName("texture_cache_memory_limit_soft", std::to_string(cache_mb));
   rex::cvar::SetFlagByName("texture_cache_memory_limit_hard", std::to_string(cache_mb * 2));
@@ -165,9 +166,11 @@ void ReWorApp::OnPreSetup(rex::RuntimeConfig& config) {
   // Opciones graficas del panel (pestana Graficos): todas son de arranque en el SDK
   re_wor::de::ApplyDisplayOptions(gfx);
   rex::cvar::SetFlagByName("d3d12_readback_resolve", "false");
-  rex::cvar::SetFlagByName("d3d12_submit_on_primary_buffer_end", "true");
+  rex::cvar::SetFlagByName("d3d12_submit_on_primary_buffer_end", "false");
   rex::cvar::SetFlagByName("d3d12_allow_variable_refresh_rate_and_tearing", "true");
   rex::cvar::SetFlagByName("d3d12_queue_priority", "1");
+  rex::cvar::SetFlagByName("ignore_thread_priorities", "true");
+  rex::cvar::SetFlagByName("ignore_thread_affinities", "true");
   rex::cvar::SetFlagByName("vulkan_allow_present_mode_mailbox", "true");
   rex::cvar::SetFlagByName("vulkan_allow_present_mode_immediate", "true");
 }
@@ -356,14 +359,7 @@ void ReWorApp::OnCreateDialogs(rex::ui::ImGuiDrawer* imgui) {
     bool native_active = (gfx.pipeline_mode == "full" || gfx.pipeline_mode == "hybrid") ||
                          (native_env && (std::strcmp(native_env, "1") == 0 || std::strcmp(native_env, "true") == 0));
     if (native_active) {
-      auto backend = re_wor::nativegfx::GraphicsBackendType::D3D11;
-      if (gfx.backend == "d3d12") {
-        TRACE("[NativeGFX] Backend DirectX 12 en desarrollo preliminar (faltan PSOs). Usando DirectX 11 nativo...");
-        backend = re_wor::nativegfx::GraphicsBackendType::D3D11;
-      } else if (gfx.backend == "vulkan") {
-        TRACE("[NativeGFX] Backend Vulkan en desarrollo preliminar (faltan PSOs). Usando DirectX 11 nativo...");
-        backend = re_wor::nativegfx::GraphicsBackendType::D3D11;
-      }
+      auto backend = re_wor::nativegfx::BackendFactory::ParseBackendType(gfx.backend);
       uint32_t width = 1920, height = 1080;
       const std::string& res = gfx.resolution;
       if (res == "720p") { width = 1280; height = 720; }
@@ -397,18 +393,22 @@ void ReWorApp::OnCreateDialogs(rex::ui::ImGuiDrawer* imgui) {
       }
 
       if (gfx.pipeline_mode == "hybrid") {
-        re_wor::nativegfx::HybridPipeline::Instance().Initialize(hwnd, backend, width, height);
+        re_wor::nativegfx::HybridPipeline::Instance().Initialize(nullptr, backend, width, height);
         TRACE("[NativeGFX] Pipeline hibrido (Fase 3) inicializado con backend " << gfx.backend << " (" << width << "x" << height << ")");
       } else {
-        re_wor::nativegfx::FullPipeline::Instance().Initialize(hwnd, backend, width, height);
+        re_wor::nativegfx::FullPipeline::Instance().Initialize(nullptr, backend, width, height);
         if (auto* ren = re_wor::nativegfx::FullPipeline::Instance().GetRenderer()) {
           ren->SetVSync(gfx.vsync);
           uint32_t aniso = 1;
-          if (gfx.aniso >= 2 && gfx.aniso <= 16) aniso = static_cast<uint32_t>(gfx.aniso);
-          else if (gfx.aniso == 1) aniso = 2;
-          else if (gfx.aniso == 2) aniso = 4;
-          else if (gfx.aniso == 3) aniso = 8;
-          else if (gfx.aniso == 4) aniso = 16;
+          switch (gfx.aniso) {
+            case 1: aniso = 2; break;
+            case 2: aniso = 4; break;
+            case 3: aniso = 8; break;
+            case 4: aniso = 16; break;
+            default:
+              aniso = (gfx.aniso >= 16) ? 16 : (gfx.aniso >= 8) ? 8 : (gfx.aniso >= 4) ? 4 : (gfx.aniso >= 2) ? 2 : 1;
+              break;
+          }
           ren->SetAnisotropy(aniso);
         }
         TRACE("[NativeGFX] Pipeline nativo completo (Fase 4) inicializado con backend " << gfx.backend << " (" << width << "x" << height << ")");

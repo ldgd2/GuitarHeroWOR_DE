@@ -174,16 +174,26 @@ bool D3D11ShaderCache::CompileShader(const std::string& source, const char* entr
 ID3D11VertexShader* D3D11ShaderCache::GetOrCreateVertexShader(uint64_t hash, const std::string& hlsl_source) {
   if (!device_ || hash == 0) return nullptr;
 
+  if (last_vs_ && hash == last_vs_hash_) {
+    return last_vs_;
+  }
+
   auto it = vs_cache_.find(hash);
-  if (it != vs_cache_.end()) return it->second.Get();
+  if (it != vs_cache_.end()) {
+    last_vs_hash_ = hash;
+    last_vs_ = it->second.Get();
+    return last_vs_;
+  }
 
   // 1. Comprobar si ya existe el bytecode compilado (.cso) en disco para carga instantanea
   std::vector<uint8_t> cso = LoadShaderBytecodeFromDisk(hash, "vs");
   if (!cso.empty()) {
     ComPtr<ID3D11VertexShader> vs;
     if (SUCCEEDED(device_->CreateVertexShader(cso.data(), cso.size(), nullptr, &vs))) {
+      last_vs_hash_ = hash;
+      last_vs_ = vs.Get();
       vs_cache_[hash] = vs;
-      return vs.Get();
+      return last_vs_;
     }
   }
 
@@ -204,9 +214,11 @@ ID3D11VertexShader* D3D11ShaderCache::GetOrCreateVertexShader(uint64_t hash, con
     ComPtr<ID3D11VertexShader> vs;
     HRESULT hr = device_->CreateVertexShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &vs);
     if (SUCCEEDED(hr)) {
+      last_vs_hash_ = hash;
+      last_vs_ = vs.Get();
       vs_cache_[hash] = vs;
       SaveShaderBytecodeToDisk(hash, "vs", blob->GetBufferPointer(), blob->GetBufferSize());
-      return vs.Get();
+      return last_vs_;
     }
   }
 
@@ -217,16 +229,26 @@ ID3D11VertexShader* D3D11ShaderCache::GetOrCreateVertexShader(uint64_t hash, con
 ID3D11PixelShader* D3D11ShaderCache::GetOrCreatePixelShader(uint64_t hash, const std::string& hlsl_source) {
   if (!device_ || hash == 0) return nullptr;
 
+  if (last_ps_ && hash == last_ps_hash_) {
+    return last_ps_;
+  }
+
   auto it = ps_cache_.find(hash);
-  if (it != ps_cache_.end()) return it->second.Get();
+  if (it != ps_cache_.end()) {
+    last_ps_hash_ = hash;
+    last_ps_ = it->second.Get();
+    return last_ps_;
+  }
 
   // 1. Comprobar si ya existe el bytecode compilado (.cso) en disco para carga instantanea
   std::vector<uint8_t> cso = LoadShaderBytecodeFromDisk(hash, "ps");
   if (!cso.empty()) {
     ComPtr<ID3D11PixelShader> ps;
     if (SUCCEEDED(device_->CreatePixelShader(cso.data(), cso.size(), nullptr, &ps))) {
+      last_ps_hash_ = hash;
+      last_ps_ = ps.Get();
       ps_cache_[hash] = ps;
-      return ps.Get();
+      return last_ps_;
     }
   }
 
@@ -247,9 +269,11 @@ ID3D11PixelShader* D3D11ShaderCache::GetOrCreatePixelShader(uint64_t hash, const
     ComPtr<ID3D11PixelShader> ps;
     HRESULT hr = device_->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &ps);
     if (SUCCEEDED(hr)) {
+      last_ps_hash_ = hash;
+      last_ps_ = ps.Get();
       ps_cache_[hash] = ps;
       SaveShaderBytecodeToDisk(hash, "ps", blob->GetBufferPointer(), blob->GetBufferSize());
-      return ps.Get();
+      return last_ps_;
     }
   }
 
@@ -260,6 +284,10 @@ ID3D11PixelShader* D3D11ShaderCache::GetOrCreatePixelShader(uint64_t hash, const
 void D3D11ShaderCache::Shutdown() {
   vs_cache_.clear();
   ps_cache_.clear();
+  last_vs_hash_ = 0;
+  last_vs_ = nullptr;
+  last_ps_hash_ = 0;
+  last_ps_ = nullptr;
   rect_gs_.Reset();
   pass_vs_.Reset();
   copy_ps_.Reset();

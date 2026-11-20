@@ -378,23 +378,37 @@ void DrawFx2D(Masked* dl, const ImVec4& r, const ActMap& on, float T) {
   auto get = [&](const char* n) -> const Act* { auto it = on.find(n); return it == on.end() ? nullptr : &it->second; };
   const float W = r.z, H = r.w, D = std::hypot(W, H);
   auto P = [&](float x, float y) { return ImVec2(r.x + x, r.y + y); };
+  int part_level = 0;
+  {
+    std::lock_guard lock(re_wor::de::Mutex());
+    part_level = re_wor::de::Get().graphics.particles;
+  }
+
   if (const Act* f = get("smoke")) {
-    for (int i = 0; i < 14; ++i) {
+    const int count = (part_level == 0) ? 5 : (part_level == 1) ? 8 : 14;
+    const int segs = (part_level == 0) ? 12 : (part_level == 1) ? 18 : 32;
+    for (int i = 0; i < count; ++i) {
       const float life = Fr(Hash(i, 3) + f->el * 0.05f), x = Fr(Hash(i, 1) + f->el * 0.02f * (Hash(i, 2) - 0.5f)) * W;
       const float y = H - life * H * 0.6f, rad = H * (0.15f + 0.15f * Hash(i, 4));
-      for (float k : {1.f, 0.7f, 0.4f}) dl->AddCircleFilled(P(x, y), rad * k, Rgba(200, 200, 205, 0.055f * f->k * (1 - life)), 32);
+      if (part_level == 0) {
+        dl->AddCircleFilled(P(x, y), rad * 0.8f, Rgba(200, 200, 205, 0.08f * f->k * (1 - life)), segs);
+      } else {
+        for (float k : {1.f, 0.7f, 0.4f}) dl->AddCircleFilled(P(x, y), rad * k, Rgba(200, 200, 205, 0.055f * f->k * (1 - life)), segs);
+      }
     }
   }
   if (const Act* f = get("rain")) {
     const ImU32 c = Rgba(180, 200, 255, 0.35f * f->k);
-    for (int i = 0; i < 200; ++i) {
+    const int count = (part_level == 0) ? 60 : (part_level == 1) ? 120 : 200;
+    for (int i = 0; i < count; ++i) {
       const float L = H * 0.05f, y = Fr(Hash(i, 3) + f->el * (1.6f + 0.8f * Hash(i, 2))) * (H + L) - L;
       const float x = Hash(i, 1) * (W + H * 0.3f) - y * 0.25f;
       dl->AddLine(P(x, y), P(x - L * 0.25f, y + L), c, std::max(1.f, H / 720));
     }
   }
   if (const Act* f = get("snow")) {
-    for (int i = 0; i < 160; ++i) {
+    const int count = (part_level == 0) ? 50 : (part_level == 1) ? 90 : 160;
+    for (int i = 0; i < count; ++i) {
       const float y = Fr(Hash(i, 3) + f->el * (0.08f + 0.1f * Hash(i, 2))) * H * 1.05f;
       const float x = Hash(i, 1) * W + std::sin(f->el * 1.3f + i) * W * 0.015f;
       dl->AddCircleFilled(P(x, y), H * (0.003f + 0.004f * Hash(i, 4)), Rgba(255, 255, 255, 0.85f * f->k), 8);
@@ -402,7 +416,8 @@ void DrawFx2D(Masked* dl, const ImVec4& r, const ActMap& on, float T) {
   }
   if (const Act* f = get("confetti")) {
     const float sz = H * 0.012f;
-    for (int i = 0; i < 140; ++i) {
+    const int count = (part_level == 0) ? 40 : (part_level == 1) ? 80 : 140;
+    for (int i = 0; i < count; ++i) {
       const float y = Fr(Hash(i, 3) + f->el * (0.15f + 0.25f * Hash(i, 2))) * H * 1.1f - H * 0.05f;
       const float x = Hash(i, 1) * W + std::sin(f->el * 2 + i) * W * 0.02f, an = f->el * 3 + i;
       const float w = std::max(1.f, sz * std::fabs(std::cos(an * 0.7f)) / 2);
@@ -412,7 +427,8 @@ void DrawFx2D(Masked* dl, const ImVec4& r, const ActMap& on, float T) {
     }
   }
   if (const Act* f = get("sparks")) {
-    for (int i = 0; i < 90; ++i) {
+    const int count = (part_level == 0) ? 30 : (part_level == 1) ? 50 : 90;
+    for (int i = 0; i < count; ++i) {
       const float life = Fr(Hash(i, 3) + f->el * (0.3f + 0.4f * Hash(i, 2))), y = H - life * H * 0.9f;
       const float x = Hash(i, 1) * W + std::sin(f->el * 3 + i) * W * 0.01f;
       dl->AddCircleFilled(P(x, y), std::max(0.5f, H * 0.004f * (1.2f - life)),
@@ -1046,7 +1062,7 @@ void OnEngineCamWrite(uint8_t* base, uint32_t obj, int fn) {
 void ReapplyCamera(uint8_t* base, int point) {
   if (!g_memo.wrote || point < 0 || point > 3) return;
   camwatch::SelfWrite self;
-  const uint32_t cam = StageCam(base);
+  const uint32_t cam = g_memo.addr ? g_memo.addr : StageCam(base);
   if (!cam) return;
   uint8_t now[96];
   if (cam != g_memo.addr) ++g_rs[point].moved;   // el motor cambio de camara (corte) a mitad de frame

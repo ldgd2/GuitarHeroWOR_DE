@@ -96,9 +96,18 @@ void BeforeEngineFrame() {
   }
   const auto period = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / hz));
   auto now = Clock::now();
+  if (s_next.time_since_epoch().count() == 0 || now - s_next > period * 2) {
+    s_next = now + period;
+    return;
+  }
+
   if (s_next > now) {
-    const auto left = s_next - now;
-    if (left > std::chrono::microseconds(1500)) std::this_thread::sleep_for(left - std::chrono::microseconds(1000));
+    auto left = s_next - now;
+    while (left > std::chrono::microseconds(1200)) {
+      std::this_thread::sleep_for(std::chrono::microseconds(1000));
+      now = Clock::now();
+      left = (s_next > now) ? (s_next - now) : Clock::duration::zero();
+    }
     while (Clock::now() < s_next) {
 #ifdef _WIN32
       YieldProcessor();

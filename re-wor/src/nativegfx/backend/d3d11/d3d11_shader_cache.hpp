@@ -39,6 +39,12 @@ class D3D11ShaderCache {
 
   std::map<uint64_t, Microsoft::WRL::ComPtr<ID3D11VertexShader>> vs_cache_;
   std::map<uint64_t, Microsoft::WRL::ComPtr<ID3D11PixelShader>> ps_cache_;
+
+  uint64_t last_vs_hash_ = 0;
+  ID3D11VertexShader* last_vs_ = nullptr;
+
+  uint64_t last_ps_hash_ = 0;
+  ID3D11PixelShader* last_ps_ = nullptr;
 };
 
 }  // namespace re_wor::nativegfx

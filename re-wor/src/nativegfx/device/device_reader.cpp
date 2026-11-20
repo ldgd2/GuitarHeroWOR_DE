@@ -19,7 +19,6 @@ inline uint32_t ReadBe32(const uint8_t* p) {
 
 DeviceReader::DeviceReader() {
   std::memset(shadow_regs_, 0, sizeof(shadow_regs_));
-  std::memset(previous_dirty_masks_, 0, sizeof(previous_dirty_masks_));
 }
 
 void DeviceReader::UpdateFromDevice(const uint8_t* memory_base, uint32_t device_guest_addr, bool force_all) {
@@ -28,17 +27,6 @@ void DeviceReader::UpdateFromDevice(const uint8_t* memory_base, uint32_t device_
 
   const uint8_t* dev_ptr = memory_base + device_guest_addr;
 
-  // Leer las máscaras de sucio (dev + 0..47)
-  const uint8_t* dirty_ptr = dev_ptr;
-  bool dirty_changed = force_all;
-  if (!force_all) {
-    if (std::memcmp(previous_dirty_masks_, dirty_ptr, kDeviceDirtyBytes) != 0) {
-      dirty_changed = true;
-      std::memcpy(previous_dirty_masks_, dirty_ptr, kDeviceDirtyBytes);
-    }
-  }
-
-  // Si no hay cambios forzados ni máscaras sucias, podemos omitir lecturas redundantes
   for (const auto& block : kDeviceRegBlocks) {
     const uint8_t* src = dev_ptr + block.offset;
     for (uint32_t i = 0; i < block.count; ++i) {
@@ -262,17 +250,41 @@ bool DeviceReader::ExtractPipelineState(PipelineState& out_state, float resoluti
   sys.res_scale[0] = resolution_scale;
   sys.res_scale[1] = resolution_scale;
 
-  // 6. Constantes de Shaders (VS float, PS float, bools, loops, fetch)
-  std::memcpy(out_state.constants.vs_float, &shadow_regs_[RegIndex::SHADER_CONSTANT_000], sizeof(out_state.constants.vs_float));
-  std::memcpy(out_state.constants.ps_float, &shadow_regs_[RegIndex::SHADER_CONSTANT_256], sizeof(out_state.constants.ps_float));
-  std::memcpy(out_state.constants.bool_bits, &shadow_regs_[RegIndex::SHADER_BOOL_CONSTANT_00], sizeof(out_state.constants.bool_bits));
-  std::memcpy(out_state.constants.loop_consts, &shadow_regs_[RegIndex::SHADER_LOOP_CONSTANT_00], sizeof(out_state.constants.loop_consts));
-  std::memcpy(out_state.constants.fetch_consts, &shadow_regs_[RegIndex::SHADER_FETCH_CONSTANT_00], sizeof(out_state.constants.fetch_consts));
+  if (std::memcmp(&cached_system_, &sys, sizeof(sys)) != 0) {
+    cached_system_ = sys;
+    ++system_version_;
+  }
+  out_state.constants.system = cached_system_;
+  out_state.constants.system_version = system_version_;
 
-  // 7. Decodificación de las 32 texturas
-  for (uint32_t i = 0; i < 32; ++i) {
-    const uint32_t* fc = &shadow_regs_[RegIndex::SHADER_FETCH_CONSTANT_00 + 6 * i];
-    out_state.bound_textures[i] = DecodeTextureFetchConstant(fc);
+  // 6. Constantes de Shaders con versionado monótono (omite 9KB de memcpy redundante por draw call)
+  if (std::memcmp(out_state.constants.vs_float, &shadow_regs_[RegIndex::SHADER_CONSTANT_000], sizeof(out_state.constants.vs_float)) != 0) {
+    std::memcpy(out_state.constants.vs_float, &shadow_regs_[RegIndex::SHADER_CONSTANT_000], sizeof(out_state.constants.vs_float));
+    ++out_state.constants.vs_version;
+  }
+  if (std::memcmp(out_state.constants.ps_float, &shadow_regs_[RegIndex::SHADER_CONSTANT_256], sizeof(out_state.constants.ps_float)) != 0) {
+    std::memcpy(out_state.constants.ps_float, &shadow_regs_[RegIndex::SHADER_CONSTANT_256], sizeof(out_state.constants.ps_float));
+    ++out_state.constants.ps_version;
+  }
+  if (std::memcmp(out_state.constants.bool_bits, &shadow_regs_[RegIndex::SHADER_BOOL_CONSTANT_00], sizeof(out_state.constants.bool_bits)) != 0 ||
+      std::memcmp(out_state.constants.loop_consts, &shadow_regs_[RegIndex::SHADER_LOOP_CONSTANT_00], sizeof(out_state.constants.loop_consts)) != 0) {
+    std::memcpy(out_state.constants.bool_bits, &shadow_regs_[RegIndex::SHADER_BOOL_CONSTANT_00], sizeof(out_state.constants.bool_bits));
+    std::memcpy(out_state.constants.loop_consts, &shadow_regs_[RegIndex::SHADER_LOOP_CONSTANT_00], sizeof(out_state.constants.loop_consts));
+    ++out_state.constants.bool_version;
+  }
+  if (std::memcmp(out_state.constants.fetch_consts, &shadow_regs_[RegIndex::SHADER_FETCH_CONSTANT_00], sizeof(out_state.constants.fetch_consts)) != 0) {
+    std::memcpy(out_state.constants.fetch_consts, &shadow_regs_[RegIndex::SHADER_FETCH_CONSTANT_00], sizeof(out_state.constants.fetch_consts));
+    ++out_state.constants.fetch_version;
+
+    // 7. Decodificación en cache de las 32 texturas solo al cambiar fetch constants
+    for (uint32_t i = 0; i < 32; ++i) {
+      const uint32_t* fc = &shadow_regs_[RegIndex::SHADER_FETCH_CONSTANT_00 + 6 * i];
+      if (std::memcmp(&cached_fetch_words_[6 * i], fc, 24) != 0) {
+        std::memcpy(&cached_fetch_words_[6 * i], fc, 24);
+        cached_textures_[i] = DecodeTextureFetchConstant(fc);
+      }
+      out_state.bound_textures[i] = cached_textures_[i];
+    }
   }
 
   // 8. Shaders activos

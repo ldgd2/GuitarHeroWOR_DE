@@ -233,6 +233,12 @@ bool VulkanDeviceContext::CreateLogicalDevice() {
   LOAD_DEV(vkDestroyDescriptorSetLayout);
   LOAD_DEV(vkCreatePipelineLayout);
   LOAD_DEV(vkDestroyPipelineLayout);
+  LOAD_DEV(vkCreateShaderModule);
+  LOAD_DEV(vkDestroyShaderModule);
+  LOAD_DEV(vkCreateGraphicsPipelines);
+  LOAD_DEV(vkDestroyPipeline);
+  LOAD_DEV(vkCmdBindPipeline);
+  LOAD_DEV(vkCmdBindDescriptorSets);
   LOAD_DEV(vkCreateSwapchainKHR);
   LOAD_DEV(vkDestroySwapchainKHR);
   LOAD_DEV(vkGetSwapchainImagesKHR);

@@ -29,9 +29,9 @@
 
 #include "core/crash_handler.hpp"
 #include "core/path_resolver.hpp"
+#include "de/de_config.hpp"
 #include "de/de_hooks.hpp"
 #include "de/frame_pacing.hpp"
-#include "de/de_hooks.hpp"
 #include "de/edfx.hpp"
 #include "generated/re_wor_pch.h"
 
@@ -884,12 +884,53 @@ bool WriteFloatGlobal(const std::string& name, uint8_t* base, float value) {
 
 void ApplyEngineLimitsPatches(uint8_t* base) {
   if (!base) return;
+
+  int part_level = 0;
+  {
+    std::lock_guard lock(re_wor::de::Mutex());
+    part_level = re_wor::de::Get().graphics.particles;
+  }
+
+  float cull_val = 0.00015f;
+  int part_buff = 500;
+  int part_node = 160;
+  int far_plane = 500;
+  int max_inst = 450;
+  int max_geom = 1100;
+  int misc_buff = 2000;
+
+  if (part_level == 1) { // Medium
+    cull_val = 0.00008f;
+    part_buff = 900;
+    part_node = 256;
+    far_plane = 650;
+    max_inst = 650;
+    max_geom = 1600;
+    misc_buff = 2500;
+  } else if (part_level == 2) { // High / Factory 360
+    cull_val = 0.00004f;
+    part_buff = 1400;
+    part_node = 384;
+    far_plane = 800;
+    max_inst = 800;
+    max_geom = 2000;
+    misc_buff = 3000;
+  } else if (part_level >= 3) { // Ultra
+    cull_val = 0.00002f;
+    part_buff = 2000;
+    part_node = 512;
+    far_plane = 1200;
+    max_inst = 1200;
+    max_geom = 2800;
+    misc_buff = 3500;
+  }
+
   int count = 0;
-  count += WriteIntGlobal("default_far_plane_distance", base, 1500) ? 1 : 0;
-  count += WriteIntGlobal("cull_max_instances", base, 1500) ? 1 : 0;
-  count += WriteIntGlobal("cull_max_geom", base, 3500) ? 1 : 0;
-  count += WriteIntGlobal("cull_max_occluder", base, 512) ? 1 : 0;
-  count += WriteFloatGlobal("cull_smallobj", base, 0.000001f) ? 1 : 0;
+  count += WriteIntGlobal("default_far_plane_distance", base, far_plane) ? 1 : 0;
+  count += WriteIntGlobal("cull_max_instances", base, max_inst) ? 1 : 0;
+  count += WriteIntGlobal("cull_max_geom", base, max_geom) ? 1 : 0;
+  count += WriteIntGlobal("cull_max_occluder", base, 384) ? 1 : 0;
+  count += WriteFloatGlobal("cull_smallobj", base, cull_val) ? 1 : 0;
   count += WriteIntGlobal("max_streams", base, 32) ? 1 : 0;
   count += WriteIntGlobal("max_sound_entries", base, 3072) ? 1 : 0;
   count += WriteIntGlobal("num_sound_instances", base, 128) ? 1 : 0;
@@ -897,17 +938,15 @@ void ApplyEngineLimitsPatches(uint8_t* base) {
   count += WriteIntGlobal("fmod_memory_size", base, 25165824) ? 1 : 0;
   count += WriteIntGlobal("cpu_skinning_buffer_size", base, 40000) ? 1 : 0;
   count += WriteIntGlobal("cpu_skin_wrap_buffer_size", base, 15000) ? 1 : 0;
-  count += WriteIntGlobal("node_instances_buff", base, 600) ? 1 : 0;
-  count += WriteIntGlobal("node_statics_buff", base, 500) ? 1 : 0;
-  count += WriteIntGlobal("node_sort_buff", base, 512) ? 1 : 0;
-  count += WriteIntGlobal("node_misc_buff", base, 4000) ? 1 : 0;
-  count += WriteIntGlobal("node_2d_buff", base, 600) ? 1 : 0;
-  count += WriteIntGlobal("node_particle_buff", base, 2500) ? 1 : 0;
-  count += WriteIntGlobal("node_particle_node", base, 512) ? 1 : 0;
-  count += WriteIntGlobal("node_light_buff", base, 300) ? 1 : 0;
-  count += WriteIntGlobal("target_ntsc_framerate", base, 240) ? 1 : 0;
-  count += WriteIntGlobal("gpu_vsync_time_interval", base, 0) ? 1 : 0;
-  TRACE("[QBBridge] Parche en memoria de limites Xbox 360 aplicado a tabla QB: " << count << " simbolos actualizados");
+  count += WriteIntGlobal("node_instances_buff", base, 1000) ? 1 : 0;
+  count += WriteIntGlobal("node_statics_buff", base, 1200) ? 1 : 0;
+  count += WriteIntGlobal("node_sort_buff", base, 1024) ? 1 : 0;
+  count += WriteIntGlobal("node_misc_buff", base, misc_buff) ? 1 : 0;
+  count += WriteIntGlobal("node_2d_buff", base, 800) ? 1 : 0;
+  count += WriteIntGlobal("node_particle_buff", base, part_buff) ? 1 : 0;
+  count += WriteIntGlobal("node_particle_node", base, part_node) ? 1 : 0;
+  count += WriteIntGlobal("node_light_buff", base, 600) ? 1 : 0;
+  TRACE("[QBBridge] Limites optimizados del motor (particulas=" << part_level << ", cull=" << cull_val << ", buff=" << part_buff << "): " << count << " simbolos aplicados");
 }
 
 std::vector<LogEntry> GetRecentLogs() {

@@ -61,6 +61,7 @@ float3 Sample(float2 uv) {
 
 // oscurecimiento por capas negras (fundido, iris, foco): tambien se aplica a las particulas
 float Dark(float2 p) {
+  if (g_misc2.z <= 0 && g_misc2.w <= 0 && g_misc.x <= 0) return 0;
   float W = g_res.x, H = g_res.y, T = g_res.z, D = sqrt(W * W + H * H);
   float a = 0;
   if (g_misc2.z > 0) {   // foco que pasea
@@ -76,12 +77,21 @@ float Dark(float2 p) {
 float4 PSMain(VOut i) : SV_Target {
   float W = g_res.x, H = g_res.y, T = g_res.z;
   float2 p = i.uv * float2(W, H);
-  // transformacion 2D de la imagen (dutch, zoompunch, vertigo, camara en mano): inversa de translate*rotate*scale
-  float2 c = float2(W, H) / 2;
-  float2 q = p - c - float2(g_xf.z * W, g_xf.w * H) / 100;
-  float r = -g_xf.x * PI / 180;
-  q = float2(q.x * cos(r) - q.y * sin(r), q.x * sin(r) + q.y * cos(r)) / max(g_xf.y, 0.01) + c;
-  float2 uv = q / float2(W, H);
+  float2 uv;
+  // Optimizacion: en el 99% de los fotogramas no hay transformacion 2D de camara (dutch/vertigo).
+  // Omitir calculo de trigonometria (cos/sin), proyeccion y divisiones por pixel.
+  [branch]
+  if (abs(g_xf.x) < 0.001 && abs(g_xf.y - 1.0) < 0.001 && abs(g_xf.z) < 0.001 && abs(g_xf.w) < 0.001) {
+    uv = i.uv;
+  } else {
+    float2 c = float2(W, H) / 2;
+    float2 q = p - c - float2(g_xf.z * W, g_xf.w * H) / 100;
+    float r = -g_xf.x * PI / 180;
+    float s, cr;
+    sincos(r, s, cr);
+    q = float2(q.x * cr - q.y * s, q.x * s + q.y * cr) / max(g_xf.y, 0.01) + c;
+    uv = q / float2(W, H);
+  }
   float3 col;
   if (any(uv < 0) || any(uv > 1)) col = 0;
   else if (g_blur.x > 0.05) {   // desenfoque: disco de Poisson
@@ -161,7 +171,7 @@ float4 PSMain(VOut i) : SV_Target {
     float d = length(p - c), a = saturate((d - H * 0.3) / (D / 2 - H * 0.3));
     col = lerp(col, float3(200, 0, 20) / 255, a * (0.25 + 0.5 * pp) * g_misc2.y);
   }
-  col *= 1 - Dark(p);
+  if (g_misc2.z > 0 || g_misc2.w > 0 || g_misc.x > 0) col *= 1 - Dark(p);
   return float4(col, 1);
 }
 
@@ -256,7 +266,10 @@ POut VSPart(uint v : SV_VertexID, uint inst : SV_InstanceID) {
 
 float4 PSPart(POut i) : SV_Target {
   float a = i.col.a;
-  if (i.kind == 2) a *= saturate(1 - length(i.uv));                 // humo: gradiente radial
-  else if (i.kind == 3) a *= saturate((1 - length(i.uv)) * 6);      // disco con borde suave
+  float d2 = dot(i.uv, i.uv);
+  if (d2 >= 1.0) discard;
+  if (i.kind == 2) a *= saturate(1.0 - d2);                          // humo: gradiente radial optimizado sin sqrt
+  else if (i.kind == 3) a *= saturate((1.0 - sqrt(d2)) * 6.0);       // disco con borde suave
+  if (a < 0.005) discard;
   return float4(i.col.rgb * (1 - Dark(i.px)), a);
 }

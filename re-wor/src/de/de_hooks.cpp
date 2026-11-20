@@ -30,6 +30,8 @@
 #include "de/frame_pacing.hpp"
 #include "de/gfx_options.hpp"
 #include "nativegfx/device/device_tracker.hpp"
+#include "nativegfx/full/full_pipeline.hpp"
+#include "nativegfx/full/vblank_generator.hpp"
 #include "generated/re_wor_pch.h"
 
 namespace re_wor::de {
@@ -212,27 +214,71 @@ namespace {
 void PatchEngineParamsInMemory(uint8_t* data, size_t size) {
   if (!data || size < 1500) return;
 
+  int part_level = 0;
+  {
+    std::lock_guard lock(re_wor::de::Mutex());
+    part_level = re_wor::de::Get().graphics.particles;
+  }
+
+  float cull_val = 0.00015f;
+  uint32_t far_plane = 500;
+  uint32_t max_inst = 450;
+  uint32_t max_geom = 1100;
+  uint32_t part_buff = 500;
+  uint32_t part_node = 160;
+  float draw_near = 550.0f;
+  float draw_far = 850.0f;
+
+  if (part_level == 1) { // Medium
+    cull_val = 0.00008f;
+    far_plane = 650;
+    max_inst = 650;
+    max_geom = 1600;
+    part_buff = 900;
+    part_node = 256;
+    draw_near = 650.0f;
+    draw_far = 1100.0f;
+  } else if (part_level == 2) { // High / Factory 360
+    cull_val = 0.00004f;
+    far_plane = 800;
+    max_inst = 800;
+    max_geom = 2000;
+    part_buff = 1400;
+    part_node = 384;
+    draw_near = 800.0f;
+    draw_far = 1300.0f;
+  } else if (part_level >= 3) { // Ultra
+    cull_val = 0.00002f;
+    far_plane = 1200;
+    max_inst = 1200;
+    max_geom = 2800;
+    part_buff = 2000;
+    part_node = 512;
+    draw_near = 1000.0f;
+    draw_far = 1800.0f;
+  }
+
   struct PatchInt { uint32_t key; uint32_t val; };
-  static const PatchInt kIntPatches[] = {
-      {0x4b642ed1, 1500},      // default_far_plane_distance
-      {0x877c2aaf, 1500},      // cull_max_instances
-      {0xc1331ede, 3500},      // cull_max_geom
-      {0x8712ac22, 512},       // cull_max_occluder
-      {0x64f3df41, 32},        // max_streams
-      {0x5896fb30, 3072},      // max_sound_entries
-      {0x4f90c3e4, 128},       // num_sound_instances
-      {0xe50baccf, 2048},      // pool_text_instances
-      {0xae3cd7c4, 25165824},  // fmod_memory_size
-      {0x80f1090c, 40000},     // cpu_skinning_buffer_size
-      {0x9ffd6a92, 15000},     // cpu_skin_wrap_buffer_size
-      {0xd71f4e67, 600},       // node_instances_buff
-      {0xc595b0e7, 500},       // node_statics_buff
-      {0xc7c8e585, 512},       // node_sort_buff
-      {0xdd014c76, 4000},      // node_misc_buff
-      {0x862259a1, 600},       // node_2d_buff
-      {0x3a77b43a, 2500},      // node_particle_buff
-      {0xca2f1e1c, 512},       // node_particle_node
-      {0xef2aeaf0, 300},       // node_light_buff
+  const PatchInt kIntPatches[] = {
+      {0x4b642ed1, far_plane},      // default_far_plane_distance
+      {0x877c2aaf, max_inst},       // cull_max_instances
+      {0xc1331ede, max_geom},       // cull_max_geom
+      {0x8712ac22, 384},            // cull_max_occluder
+      {0x64f3df41, 32},             // max_streams
+      {0x5896fb30, 3072},           // max_sound_entries
+      {0x4f90c3e4, 128},            // num_sound_instances
+      {0xe50baccf, 2048},           // pool_text_instances
+      {0xae3cd7c4, 25165824},       // fmod_memory_size
+      {0x80f1090c, 40000},          // cpu_skinning_buffer_size
+      {0x9ffd6a92, 15000},          // cpu_skin_wrap_buffer_size
+      {0xd71f4e67, 1000},           // node_instances_buff
+      {0xc595b0e7, 1200},           // node_statics_buff
+      {0xc7c8e585, 1024},           // node_sort_buff
+      {0xdd014c76, 2500},           // node_misc_buff
+      {0x862259a1, 800},            // node_2d_buff
+      {0x3a77b43a, part_buff},      // node_particle_buff
+      {0xca2f1e1c, part_node},      // node_particle_node
+      {0xef2aeaf0, 600},            // node_light_buff
       // target_ntsc_framerate y gpu_vsync_time_interval NO se tocan: son la temporizacion del motor y los FPS
       // altos los gestiona frame_pacing sin cambiar la velocidad del juego.
   };
@@ -255,27 +301,39 @@ void PatchEngineParamsInMemory(uint8_t* data, size_t size) {
     }
   }
 
-  // cull_smallobj (float 0.000001f en BE IEEE-754: 0x358637bd)
+  // cull_smallobj (float en BE IEEE-754)
+  uint32_t raw_so = 0;
+  std::memcpy(&raw_so, &cull_val, sizeof(float));
+  raw_so = (raw_so >> 24) | ((raw_so >> 8) & 0x0000FF00) | ((raw_so << 8) & 0x00FF0000) | (raw_so << 24);
+
   const uint32_t smallobj_key = 0x5ca62f8f;
-  const uint32_t smallobj_val = 0x358637bd;
   uint8_t so_key[4] = {
       uint8_t(smallobj_key >> 24), uint8_t(smallobj_key >> 16),
       uint8_t(smallobj_key >> 8),  uint8_t(smallobj_key)
   };
   for (size_t i = 0; i + 8 <= size; i += 4) {
     if (std::memcmp(data + i, so_key, 4) == 0) {
-      data[i + 4] = uint8_t(smallobj_val >> 24);
-      data[i + 5] = uint8_t(smallobj_val >> 16);
-      data[i + 6] = uint8_t(smallobj_val >> 8);
-      data[i + 7] = uint8_t(smallobj_val);
+      data[i + 4] = uint8_t(raw_so >> 24);
+      data[i + 5] = uint8_t(raw_so >> 16);
+      data[i + 6] = uint8_t(raw_so >> 8);
+      data[i + 7] = uint8_t(raw_so);
       applied++;
       break;
     }
   }
 
-  // Draw distance floats [600.0, 1000.0] -> [1800.0, 3500.0]
+  // Draw distance floats [600.0, 1000.0] adaptados dinamicamente a la calidad de particulas
+  uint32_t raw_near = 0, raw_far = 0;
+  std::memcpy(&raw_near, &draw_near, sizeof(float));
+  std::memcpy(&raw_far, &draw_far, sizeof(float));
+  raw_near = (raw_near >> 24) | ((raw_near >> 8) & 0x0000FF00) | ((raw_near << 8) & 0x00FF0000) | (raw_near << 24);
+  raw_far = (raw_far >> 24) | ((raw_far >> 8) & 0x0000FF00) | ((raw_far << 8) & 0x00FF0000) | (raw_far << 24);
+
   uint8_t old_draw[8] = {0x44, 0x16, 0x00, 0x00, 0x44, 0x7a, 0x00, 0x00};
-  uint8_t new_draw[8] = {0x44, 0xe1, 0x00, 0x00, 0x45, 0x5a, 0xc0, 0x00};
+  uint8_t new_draw[8];
+  std::memcpy(new_draw, &raw_near, 4);
+  std::memcpy(new_draw + 4, &raw_far, 4);
+
   for (size_t i = 0; i + 8 <= size; i += 4) {
     if (std::memcmp(data + i, old_draw, 8) == 0) {
       std::memcpy(data + i, new_draw, 8);
@@ -323,6 +381,58 @@ REWOR_CAM_WRITER(8246A278, 7)
 REWOR_CAM_WRITER(825E53A0, 8)
 REWOR_CAM_WRITER(826F49E8, 9)
 #undef REWOR_CAM_WRITER
+
+// Sincronización del motor con el hilo de render (original de Xbox 360).
+// En la consola hacía un spin-loop de hardware ciego (while (r31+24 == r31+20)).
+// En PC recompilado ese loop quemaba un núcleo al 100% de TDP, sobrecalentaba
+// la laptop y saturaba el bus de memoria L1/L2 robándole ciclos al hilo de render.
+extern "C" void sub_823D9CA0(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" void sub_82584048(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" REX_FUNC(sub_8242ABE8) {
+  REX_FUNC_PROLOGUE();
+  const uint32_t sync_obj = ctx.r3.u32;
+  const uint64_t orig_r31 = ctx.r31.u64;
+  const uint32_t orig_lr = ctx.lr;
+  const uint32_t orig_r1 = ctx.r1.u32;
+  const uint32_t new_r1 = orig_r1 - 96;
+
+  REX_STORE_U32(orig_r1 - 8, orig_lr);
+  REX_STORE_U64(orig_r1 - 16, orig_r31);
+  REX_STORE_U32(new_r1, orig_r1);
+  ctx.r1.u32 = new_r1;
+  ctx.r31.u64 = sync_obj;
+
+  ctx.lr = 0x8242AC00;
+  sub_823D9CA0(ctx, base);
+
+  ctx.r11.s64 = -2105147392;
+  ctx.r4.s64 = ctx.r11.s64 + 3624;
+  ctx.lr = 0x8242AC0C;
+  sub_82584048(ctx, base);
+
+  REX_STORE_U8(sync_obj + 28, 1);
+
+  int spin = 0;
+  while (REX_LOAD_U32(sync_obj + 24) == REX_LOAD_U32(sync_obj + 20)) {
+    if (spin < 32) {
+#ifdef _WIN32
+      YieldProcessor();
+#endif
+      ++spin;
+    } else if (spin < 128) {
+      std::this_thread::yield();
+      ++spin;
+    } else {
+      std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+  }
+
+  REX_STORE_U8(sync_obj + 28, 0);
+
+  ctx.r1.u32 = orig_r1;
+  ctx.lr = orig_lr;
+  ctx.r31.u64 = orig_r31;
+}
 
 // Frame LOGICO del motor (espera al hilo de render, mide dt con
 // KeQueryPerformanceCounter y lo guarda en 0x829BB2E0 como double).

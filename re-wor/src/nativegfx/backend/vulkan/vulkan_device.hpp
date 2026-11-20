@@ -57,6 +57,12 @@ struct VulkanDispatch {
   PFN_vkDestroyDescriptorSetLayout vkDestroyDescriptorSetLayout = nullptr;
   PFN_vkCreatePipelineLayout vkCreatePipelineLayout = nullptr;
   PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout = nullptr;
+  PFN_vkCreateShaderModule vkCreateShaderModule = nullptr;
+  PFN_vkDestroyShaderModule vkDestroyShaderModule = nullptr;
+  PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines = nullptr;
+  PFN_vkDestroyPipeline vkDestroyPipeline = nullptr;
+  PFN_vkCmdBindPipeline vkCmdBindPipeline = nullptr;
+  PFN_vkCmdBindDescriptorSets vkCmdBindDescriptorSets = nullptr;
 
   PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR = nullptr;
   PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR = nullptr;

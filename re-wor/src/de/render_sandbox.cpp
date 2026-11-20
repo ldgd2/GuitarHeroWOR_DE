@@ -52,7 +52,8 @@ int g_tries = 0;
 // ---------------------------------------------------------------- estado compartido (hilo logico <-> GPU)
 std::mutex g_mx;
 std::array<float, kConsts> g_logic_consts{};   // ultimo calculo del hilo logico
-bool g_logic_any = false;                       // hay algo que dibujar
+std::atomic<bool> g_logic_any{false};           // hay algo que dibujar (lock-free para el hilo de GPU)
+std::atomic<int> g_particle_level{0};          // cache de Get().graphics.particles para evitar mutex en GPU
 std::string g_src_pending;                      // HLSL nuevo leido del disco
 bool g_src_dirty = false;
 
@@ -60,6 +61,7 @@ std::atomic<int64_t> g_last_pass_ms{0};         // ultima pasada hecha (ms de Cl
 std::atomic<bool> g_failed{false};              // no hay forma: se vuelve al camino anterior en esta sesion
 std::atomic<int> g_song{0};                     // 1 si hay cancion en marcha (escenario)
 std::atomic<bool> g_anchor_ok{false};           // el frame tiene un resolve del escenario antes del final
+std::atomic<int> g_anchor_log_count{0};
 
 int64_t NowMs() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
 
@@ -114,16 +116,21 @@ uint32_t OnResolve(const rex::graphics::ResolveHookInfo& r) {
   if (r.src_select >= 4 || !IsFull(r.dest_pitch, r.dest_height)) return 0;
   const int nth = g_full_now++;
   if (nth != 0 || g_full_prev < 2 || !g_song.load() || g_failed.load()) return 0;
-  bool any;
-  { std::lock_guard<std::mutex> lk(g_mx); any = g_logic_any; }
-  if (!any) return 0;
+  if (!g_logic_any.load(std::memory_order_acquire)) return 0;
   AdoptLogicState();
   if (g_src_live.empty()) return 0;
   g_hooks->hlsl = g_src_live.c_str();
   g_hooks->hlsl_version = g_src_version;
   g_hooks->constants = g_gpu_consts.data();
   g_hooks->constant_count = kConsts;
-  g_hooks->particle_instances = kParticles;
+  // Solo activar la pasada instanciada de particulas en GPU si algun efecto esta en marcha
+  const bool has_particles = (g_gpu_consts[52] > 0.f || g_gpu_consts[53] > 0.f ||
+                              g_gpu_consts[54] > 0.f || g_gpu_consts[55] > 0.f ||
+                              g_gpu_consts[56] > 0.f || g_gpu_consts[57] > 0.f ||
+                              g_gpu_consts[45] > 0.f);
+  const int part_level = g_particle_level.load(std::memory_order_relaxed);
+  uint32_t active_instances = (part_level == 0) ? 220 : (part_level == 1) ? 380 : kParticles;
+  g_hooks->particle_instances = has_particles ? active_instances : 0;
   ++g_passes_frame;
   return rex::graphics::kDrawHookPassAfter;
 }
@@ -139,9 +146,11 @@ void OnSwap() {
   g_full_prev = full;
   const bool ok = full >= 2;
   if (ok != g_anchor_ok.load() && g_song.load()) {
-    TRACE("[Sandbox] " << (ok ? "enganche listo: la pasada va antes del 1er resolve a pantalla completa (de "
-                              : "sin enganche seguro (el frame no resuelve el escenario aparte del HUD): ")
-                       << full << (ok ? ")" : " resolve(s) completos; efectos por el camino anterior"));
+    if (g_anchor_log_count.fetch_add(1) < 2) {
+      TRACE("[Sandbox] " << (ok ? "enganche listo: la pasada va antes del 1er resolve a pantalla completa (de "
+                                : "sin enganche seguro (el frame no resuelve el escenario aparte del HUD): ")
+                         << full << (ok ? ")" : " resolve(s) completos; efectos por el camino anterior"));
+    }
   }
   g_anchor_ok = ok;
   if (g_song.load() && g_census_logs < 2 && !g_frame_res.empty()) {
@@ -471,6 +480,7 @@ void Install() {
     g_hooks->log = &OnLog;
     g_hooks->before_pass = &BeforePass;
     g_installed = true;
+    g_frame_res.reserve(256);
     std::error_code ec;
     fs::remove(ExeDir() / "sandbox_marker.txt", ec);   // del metodo viejo (marcador): ya no se usa
     TRACE("[Sandbox] gancho de render instalado en " << dll << " (enganche: resolve del escenario antes del HUD)");
@@ -484,12 +494,22 @@ void OnLogicFrame() {
   const double ms = edfx::SongMsNow();
   const auto fx = edfx::ActiveFxNow();
   const bool song = edfx::SongPlaying() && ms > 1000;
+  const bool was_song = g_song.load() != 0;
   g_song = song ? 1 : 0;
+  if (song && !was_song) {
+    g_anchor_log_count.store(0);
+  }
   std::array<float, kConsts> c;
   const bool any = song && Compose(fx, static_cast<float>(ms / 1000.0), c);
-  std::lock_guard<std::mutex> lk(g_mx);
-  if (any) g_logic_consts = c;
-  g_logic_any = any;
+  {
+    std::lock_guard lock(Mutex());
+    g_particle_level.store(Get().graphics.particles, std::memory_order_relaxed);
+  }
+  {
+    std::lock_guard<std::mutex> lk(g_mx);
+    if (any) g_logic_consts = c;
+  }
+  g_logic_any.store(any, std::memory_order_release);
 }
 
 NativeMode Mode() {
@@ -499,8 +519,7 @@ NativeMode Mode() {
 
 bool DrawsImage() {
   if (!g_installed || g_failed.load() || !g_anchor_ok.load()) return false;
-  bool any;
-  { std::lock_guard<std::mutex> lk(g_mx); any = g_logic_any; }
+  const bool any = g_logic_any.load(std::memory_order_relaxed);
   // con efectos, solo si las pasadas estan llegando de verdad (si no, vuelve la capa vieja)
   return !any || NowMs() - g_last_pass_ms.load() < 1500;
 }

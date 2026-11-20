@@ -36,10 +36,9 @@ void DeviceTracker::OnD3DCall(const uint8_t* memory_base, uint32_t func, uint32_
     // Resolve (copia de superficie a textura)
     ++total_resolves_;
     if (!listeners_.empty()) {
-      ResolveCommand cmd;
-      if (reader_.ExtractResolveCommand(func, args, cmd)) {
+      if (reader_.ExtractResolveCommand(func, args, cached_resolve_cmd_)) {
         for (auto* listener : listeners_) {
-          listener->OnResolve(cmd);
+          listener->OnResolve(cached_resolve_cmd_);
         }
       }
     }
@@ -47,10 +46,9 @@ void DeviceTracker::OnD3DCall(const uint8_t* memory_base, uint32_t func, uint32_
     // Llamada de dibujo (Draw)
     ++total_draws_;
     if (!listeners_.empty()) {
-      DrawCommand cmd;
-      if (reader_.ExtractDrawCommand(func, args, memory_base, cmd, resolution_scale_)) {
+      if (reader_.ExtractDrawCommand(func, args, memory_base, cached_cmd_, resolution_scale_)) {
         for (auto* listener : listeners_) {
-          listener->OnDraw(cmd);
+          listener->OnDraw(cached_cmd_);
         }
       }
     }

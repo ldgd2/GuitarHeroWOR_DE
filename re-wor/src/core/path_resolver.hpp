@@ -13,6 +13,9 @@ std::filesystem::path get_executable_directory();
 // NUNCA hardcodea rutas absolutas.
 std::filesystem::path get_base_directory();
 
+// Permite especificar una ruta de datos personalizada programáticamente.
+void set_custom_base_directory(const std::filesystem::path& path);
+
 // Rutas derivadas dinámicamente
 std::filesystem::path get_assets_directory();
 std::filesystem::path get_mods_directory();

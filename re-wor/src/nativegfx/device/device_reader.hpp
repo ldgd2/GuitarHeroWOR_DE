@@ -48,7 +48,12 @@ class DeviceReader {
 
   uint32_t current_device_addr_ = 0;
   uint32_t shadow_regs_[kMaxRegisters] = {};
-  uint8_t previous_dirty_masks_[kDeviceDirtyBytes] = {};
+
+  mutable TextureDesc cached_textures_[32] = {};
+  mutable uint32_t cached_fetch_words_[32 * 6] = {};
+
+  mutable uint32_t system_version_ = 1;
+  mutable SystemNdcConstants cached_system_ = {};
 
   BoundShaderInfo active_vs_;
   BoundShaderInfo active_ps_;

@@ -160,7 +160,7 @@ target_link_libraries(re_wor PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(re_wor PRIVATE winmm d3d11 d3d12 dxgi d3dcompiler dxguid)
+    target_link_libraries(re_wor PRIVATE winmm d3d11 d3d12 dxgi d3dcompiler dxguid ole32 shell32)
 endif()
 
 if(REWOR_ENABLE_DISCORD_RPC)

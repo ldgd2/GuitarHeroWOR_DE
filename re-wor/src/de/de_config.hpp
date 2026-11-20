@@ -118,7 +118,7 @@ struct GraphicsConfig {
   std::string backend = "d3d12";            // API grafica: "d3d12", "vulkan" o "d3d11" (D3D11 para PCs antiguas / APUs)
   std::string pipeline_mode = "full";       // "full" (Fase 4: 100% nativo sin EDRAM), "hybrid" (Fase 3), "emulated"
   std::string render_target_path = "rtv";   // "rtv" (Hardware ROP - rapido para Nvidia/AMD/Intel y patatas), "rov"
-  int resolution_scale = 1;                 // 1 = 720p (ligero/patatas), 2 = 1440p/4K (high-end)
+  int resolution_scale = 1;                 // 1 = resolucion nativa 1:1 directa (720p->720p, 1080p->1080p)
   int texture_cache_mb = 1024;              // limite de textura (MB) para evitar tirones
   bool async_pipeline_compile = true;       // compilar shaders en hilos paralelos
   // Pantalla (cvars del SDK; se aplican al arrancar)
@@ -147,16 +147,19 @@ struct GraphicsConfig {
   float blur = 0.0f;                        // 0..1 desenfoque suave del escenario
   // Publico (qb/crowd.q): 0 ninguno, 1 bajo (filas 3D de delante), 2 medio (publico 2D del fondo), 3 alto (original)
   int crowd = 3;
+  // Humo, niebla y particulas (qb/options_graphics.q): 0 optimizado (culling agresivo en planos abiertos), 1 medio, 2 alto, 3 ultra
+  int particles = 0;
   // Presets de calidad. No tocan la resolucion ni la pantalla: solo AA, filtrado, post-proceso y cache.
   void ApplyPreset(int p) {
-    static const struct { bool msaa, fxaa; int aniso; bool post; int cache; } k[4] = {
-        {false, false, 0, false, 512},   // Low
-        {false, true, 2, true, 1024},    // Medium
-        {true, false, 3, true, 1024},    // High
-        {true, true, 4, true, 2048},     // Ultra
+    static const struct { bool msaa, fxaa; int aniso; bool post; int cache; int crowd; int part; } k[4] = {
+        {false, false, 0, false, 512,  0, 0},   // Low: crowd=0, particles=0 (maximo rendimiento en planos abiertos)
+        {false, true,  2, true,  1024, 1, 1},   // Medium: crowd=1, particles=1 (balanceado)
+        {true,  false, 3, true,  1024, 2, 2},   // High: crowd=2, particles=2 (original 360)
+        {true,  true,  4, true,  2048, 3, 2},   // Ultra: crowd=3, particles=2
     };
     if (p < 0 || p > 3) { preset = 4; return; }
     msaa2x = k[p].msaa; fxaa = k[p].fxaa; aniso = k[p].aniso; post_fx = k[p].post; texture_cache_mb = k[p].cache;
+    crowd = k[p].crowd; particles = k[p].part;
     preset = p;
   }
   int MatchPreset() const {
@@ -164,7 +167,7 @@ struct GraphicsConfig {
       GraphicsConfig t = *this;
       t.ApplyPreset(p);
       if (t.msaa2x == msaa2x && t.fxaa == fxaa && t.aniso == aniso && t.post_fx == post_fx &&
-          t.texture_cache_mb == texture_cache_mb)
+          t.texture_cache_mb == texture_cache_mb && t.crowd == crowd && t.particles == particles)
         return p;
     }
     return 4;

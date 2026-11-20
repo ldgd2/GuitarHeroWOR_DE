@@ -22,19 +22,19 @@ int re_gfx_v3 = 0       // modo de pantalla
 int re_gfx_v4 = 0       // frecuencia (FPS del juego)
 int re_gfx_v5 = 0       // VSync del monitor
 int re_gfx_v6 = 0       // contador de FPS (0 no, 1 si, 2 detallado)
-int re_gfx_v7 = 0       // resolucion de render
-int re_gfx_v8 = 2       // antialiasing (0 no, 1 FXAA, 2 MSAA 2x, 3 ambos)
-int re_gfx_v9 = 3       // filtrado de texturas
-int re_gfx_v10 = 1      // post-proceso
-int re_gfx_v11 = 0      // bloom
-int re_gfx_v12 = 0      // glow
-int re_gfx_v13 = 0      // blur
-int re_gfx_v14 = 5      // brillo (5 = neutro)
-int re_gfx_v15 = 5      // contraste
-int re_gfx_v16 = 5      // saturacion
-int re_gfx_v17 = 0      // vineta
-int re_gfx_v18 = 0      // grano
-int re_gfx_v19 = 3      // publico (0 ninguno .. 3 original)
+int re_gfx_v7 = 2       // antialiasing (0 no, 1 FXAA, 2 MSAA 2x, 3 ambos)
+int re_gfx_v8 = 3       // filtrado de texturas
+int re_gfx_v9 = 1       // post-proceso
+int re_gfx_v10 = 0      // bloom
+int re_gfx_v11 = 0      // glow
+int re_gfx_v12 = 0      // blur
+int re_gfx_v13 = 5      // brillo (5 = neutro)
+int re_gfx_v14 = 5      // contraste
+int re_gfx_v15 = 5      // saturacion
+int re_gfx_v16 = 0      // vineta
+int re_gfx_v17 = 0      // grano
+int re_gfx_v18 = 3      // publico (0 ninguno .. 3 original)
+int re_gfx_v19 = 0      // humo y niebla (0 optimizado .. 3 ultra)
 int re_gfx_active = 0  // 1 = el estado de options_facebook muestra la pantalla Graphics
 int re_gfx_reset = 0   // 1 = valores por defecto (re-wor lo vuelve a 0)
 int re_gfx_pending = 0 // 1 = hay cambios que se aplican al reiniciar (lo escribe re-wor)
@@ -278,7 +278,7 @@ script re_gfx_info opt = 0
             value = ($re_gfx_v0)
         case 1
             label = "Graphics API"
-            values = [ "Direct3D 12" "Vulkan" ]
+            values = [ "Direct3D 12" "Vulkan" "Direct3D 11" ]
             value = ($re_gfx_v1)
             restart = 1
         case 2
@@ -302,62 +302,61 @@ script re_gfx_info opt = 0
             values = [ "Off" "On" "Detailed" ]
             value = ($re_gfx_v6)
         case 7
-            label = "Render Resolution"
-            values = [ "1x  (720p)" "2x  (1440p)" "3x  (2160p)" "4x  (2880p)" ]
+            label = "Anti-Aliasing"
+            values = [ "Off" "FXAA" "MSAA 2x" "MSAA 2x + FXAA" ]
             value = ($re_gfx_v7)
             restart = 1
         case 8
-            label = "Anti-Aliasing"
-            values = [ "Off" "FXAA" "MSAA 2x" "MSAA 2x + FXAA" ]
+            label = "Texture Filtering"
+            values = [ "Trilinear" "Anisotropic 2x" "Anisotropic 4x" "Anisotropic 8x" "Anisotropic 16x" ]
             value = ($re_gfx_v8)
             restart = 1
         case 9
-            label = "Texture Filtering"
-            values = [ "Trilinear" "Anisotropic 2x" "Anisotropic 4x" "Anisotropic 8x" "Anisotropic 16x" ]
-            value = ($re_gfx_v9)
-            restart = 1
-        case 10
             label = "Post-Processing"
             values = [ "Off" "On" ]
+            value = ($re_gfx_v9)
+        case 10
+            label = "Bloom"
+            kind = 1
             value = ($re_gfx_v10)
         case 11
-            label = "Bloom"
+            label = "Glow"
             kind = 1
             value = ($re_gfx_v11)
         case 12
-            label = "Glow"
+            label = "Blur"
             kind = 1
             value = ($re_gfx_v12)
         case 13
-            label = "Blur"
+            label = "Brightness"
             kind = 1
+            offset = -5
             value = ($re_gfx_v13)
         case 14
-            label = "Brightness"
+            label = "Contrast"
             kind = 1
             offset = -5
             value = ($re_gfx_v14)
         case 15
-            label = "Contrast"
+            label = "Saturation"
             kind = 1
             offset = -5
             value = ($re_gfx_v15)
         case 16
-            label = "Saturation"
+            label = "Vignette"
             kind = 1
-            offset = -5
             value = ($re_gfx_v16)
         case 17
-            label = "Vignette"
+            label = "Film Grain"
             kind = 1
             value = ($re_gfx_v17)
         case 18
-            label = "Film Grain"
-            kind = 1
-            value = ($re_gfx_v18)
-        case 19
             label = "Crowd"
             values = [ "None" "Low" "Medium" "High" ]
+            value = ($re_gfx_v18)
+        case 19
+            label = "Stage Smoke & Fog"
+            values = [ "Optimized" "Medium" "High" "Ultra" ]
             value = ($re_gfx_v19)
         default
             label = "Reset to Defaults"
@@ -493,7 +492,7 @@ script re_gfx_watch_redraw
             begin
                 re_gfx_refresh_row opt = <i>
                 i = (<i> + 1)
-            repeat 20
+            repeat 21
             return
         endif
         Wait 1 gameframe
@@ -522,5 +521,5 @@ script re_gfx_refresh_after_reset
     begin
         re_gfx_refresh_row opt = <i>
         i = (<i> + 1)
-    repeat 20
+    repeat 21
 endscript

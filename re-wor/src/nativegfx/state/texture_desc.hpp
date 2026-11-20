@@ -57,6 +57,18 @@ struct TextureDesc {
   }
 };
 
+inline uint64_t TextureHash(const TextureDesc& d) {
+  uint64_t h = 1469598103934665603ull;
+  auto add = [&](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
+  add(d.guest_physical_address);
+  add(d.width);
+  add(d.height);
+  add(d.format_id);
+  add(d.is_tiled ? 1 : 0);
+  add(d.endianness);
+  return h;
+}
+
 // Decodifica las 6 palabras uint32 de una constante de fetch en TextureDesc
 TextureDesc DecodeTextureFetchConstant(const uint32_t fc[6]);
 

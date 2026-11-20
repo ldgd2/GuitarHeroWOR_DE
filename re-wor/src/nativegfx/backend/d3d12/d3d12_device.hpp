@@ -31,6 +31,7 @@ class D3D12DeviceContext {
   D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentRtvHandle() const;
   D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHandle() const;
   ID3D12Resource* GetCurrentRenderTarget() const { return render_targets_[frame_index_].Get(); }
+  IDXGISwapChain3* GetSwapChain() const { return swap_chain_.Get(); }
 
   uint32_t GetWidth() const { return width_; }
   uint32_t GetHeight() const { return height_; }

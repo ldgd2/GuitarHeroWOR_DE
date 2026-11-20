@@ -80,7 +80,7 @@ void FullPipeline::OnSwap() {
 
   ++total_frames_rendered_;
 
-  // Solo presentar a la ventana si realmente se emitieron draws nativos
+  // Enviar trabajo a la GPU (la presentacion a la ventana se realiza de forma unificada sin colisiones)
   if (total_native_draws_ > 0) {
     renderer_->EndFrame();
     renderer_->Present();

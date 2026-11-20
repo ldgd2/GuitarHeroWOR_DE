@@ -58,6 +58,9 @@ class DeviceTracker {
   DeviceReader reader_;
   std::vector<IDeviceEventListener*> listeners_;
 
+  DrawCommand cached_cmd_;
+  ResolveCommand cached_resolve_cmd_;
+
   uint64_t total_draws_    = 0;
   uint64_t total_resolves_ = 0;
   uint64_t total_frames_   = 0;

@@ -61,6 +61,19 @@ void ApplyDisplayOptions(const GraphicsConfig& g) {
   // Las cvars del plugin de GPU aun no existen aqui: el SDK las guarda y las aplica al cargarlo
   Set("native_2x_msaa", g.msaa2x ? "true" : "false");
   Set("anisotropic_override", std::to_string(std::clamp(g.aniso, 0, 4) + 1));   // 1 = 1x ... 5 = 16x
+
+  // Desbloquear limite de memoria de la cache de texturas en el plugin de GPU:
+  const int cache_mb = std::clamp(g.texture_cache_mb, 256, 4096);
+  Set("texture_cache_memory_limit_soft", std::to_string(cache_mb * 3 / 4));
+  Set("texture_cache_memory_limit_hard", std::to_string(cache_mb));
+  Set("texture_cache_memory_limit_render_to_texture", std::to_string(std::clamp(cache_mb / 16, 24, 128)));
+
+  // Optimizaciones de renderizado y estabilidad en DirectX 12:
+  Set("render_target_path_d3d12", g.render_target_path.empty() ? "rtv" : g.render_target_path);
+  Set("async_shader_compilation", g.async_pipeline_compile ? "true" : "false");
+  Set("use_fuzzy_alpha_epsilon", "true");
+  Set("d3d12_submit_on_primary_buffer_end", "true");
+
   ApplyLiveDisplayOptions(g);
   TRACE("[Graficos] api=" << g.backend << " preset=" << g.preset << " resolucion='" << g.resolution
         << "' modo=" << g.window_mode << " " << g.refresh_hz << " Hz salida=" << up << " nitidez=" << g.sharpness
@@ -79,11 +92,15 @@ void ApplyLiveDisplayOptions(const GraphicsConfig& g) {
     auto* ren = nativegfx::FullPipeline::Instance().GetRenderer();
     ren->SetVSync(g.vsync);
     uint32_t aniso = 1;
-    if (g.aniso >= 2 && g.aniso <= 16) aniso = static_cast<uint32_t>(g.aniso);
-    else if (g.aniso == 1) aniso = 2;
-    else if (g.aniso == 2) aniso = 4;
-    else if (g.aniso == 3) aniso = 8;
-    else if (g.aniso == 4) aniso = 16;
+    switch (g.aniso) {
+      case 1: aniso = 2; break;
+      case 2: aniso = 4; break;
+      case 3: aniso = 8; break;
+      case 4: aniso = 16; break;
+      default:
+        aniso = (g.aniso >= 16) ? 16 : (g.aniso >= 8) ? 8 : (g.aniso >= 4) ? 4 : (g.aniso >= 2) ? 2 : 1;
+        break;
+    }
     ren->SetAnisotropy(aniso);
   }
 }
@@ -162,8 +179,10 @@ void FinishConfirm(bool keep) {
   if (!keep) ApplyWindow(c.prev_res, c.prev_mode);
   {
     std::lock_guard lock(Mutex());
-    Get().graphics.resolution = keep ? c.new_res : c.prev_res;
+    const std::string& chosen = keep ? c.new_res : c.prev_res;
+    Get().graphics.resolution = chosen;
     Get().graphics.window_mode = keep ? c.new_mode : c.prev_mode;
+    Get().graphics.resolution_scale = 1;
   }
   Save();
   TRACE("[Graficos] " << (keep ? "resolucion confirmada: " : "sin confirmar, se vuelve a: ")
@@ -243,11 +262,11 @@ void TickDisplayConfirm(uint8_t* base) {
 
 // ---------------------------------------------------------------------------- menu del juego
 namespace {
-// re_gfx_v0 .. re_gfx_v20, mismo orden que qb/options_graphics.q
+// re_gfx_v0 .. re_gfx_v19, mismo orden que qb/options_graphics.q
 enum Opt {
-  kPreset, kApi, kResolution, kDisplayMode, kFrameRate, kVSync, kShowFps, kRenderScale, kAntiAliasing,
+  kPreset, kApi, kResolution, kDisplayMode, kFrameRate, kVSync, kShowFps, kAntiAliasing,
   kTextureFilter, kPostFx, kBloom, kGlow, kBlur, kBrightness, kContrast, kSaturation, kVignette, kGrain,
-  kCrowd, kOptions
+  kCrowd, kParticles, kOptions
 };
 const char* const kResolutions[] = {"", "720p", "1080p", "1440p", "4k"};
 const int kRates[] = {60, 75, 120, 144, 165, 240};
@@ -265,7 +284,6 @@ void ToMenu(const GraphicsConfig& g, int* m) {
   for (int i = 0; i < 6; ++i) if (g.refresh_hz == kRates[i]) m[kFrameRate] = i;
   m[kVSync] = g.vsync ? 1 : 0;
   m[kShowFps] = g.show_fps ? (g.perf_detail ? 2 : 1) : 0;
-  m[kRenderScale] = std::clamp(g.resolution_scale, 1, 4) - 1;
   m[kAntiAliasing] = (g.msaa2x ? 2 : 0) + (g.fxaa ? 1 : 0);   // Off, FXAA, MSAA 2x, MSAA 2x + FXAA
   m[kTextureFilter] = std::clamp(g.aniso, 0, 4);
   m[kPostFx] = g.post_fx ? 1 : 0;
@@ -278,6 +296,7 @@ void ToMenu(const GraphicsConfig& g, int* m) {
   m[kVignette] = Step10(g.vignette);
   m[kGrain] = Step10(g.grain);
   m[kCrowd] = std::clamp(g.crowd, 0, 3);
+  m[kParticles] = std::clamp(g.particles, 0, 3);
 }
 
 void FromMenu(int i, int v, GraphicsConfig& g) {
@@ -285,12 +304,15 @@ void FromMenu(int i, int v, GraphicsConfig& g) {
   switch (i) {
     case kPreset: g.ApplyPreset(in(5)); return;   // 4 = Custom: no cambia nada
     case kApi: g.backend = in(3) == 1 ? "vulkan" : in(3) == 2 ? "d3d11" : "d3d12"; break;
-    case kResolution: g.resolution = kResolutions[in(5)]; break;
+    case kResolution: {
+      g.resolution = kResolutions[in(5)];
+      g.resolution_scale = 1;
+      break;
+    }
     case kDisplayMode: g.window_mode = in(3); break;
     case kFrameRate: g.refresh_hz = kRates[in(6)]; break;
     case kVSync: g.vsync = v != 0; break;
     case kShowFps: g.show_fps = in(3) > 0; g.perf_detail = in(3) == 2; break;
-    case kRenderScale: g.resolution_scale = in(4) + 1; break;
     case kAntiAliasing: g.msaa2x = in(4) >= 2; g.fxaa = in(4) & 1; break;
     case kTextureFilter: g.aniso = in(5); break;
     case kPostFx: g.post_fx = v != 0; break;
@@ -303,6 +325,7 @@ void FromMenu(int i, int v, GraphicsConfig& g) {
     case kVignette: g.vignette = in(11) / 10.f; break;
     case kGrain: g.grain = in(11) / 10.f; break;
     case kCrowd: g.crowd = in(4); break;
+    case kParticles: g.particles = in(4); break;
   }
   g.preset = g.MatchPreset();   // tocar a mano una opcion del preset lo deja en Custom
 }
@@ -325,7 +348,16 @@ void SyncCrowd(uint8_t* base, int level) {
   }
   // solo con el escenario cargado (durante una cancion): en los menus no hay publico que tocar
   if (!edfx::SongPlaying()) return;
-  if (changed || (++s_tick % 20) == 0) qb_bridge::ExecuteScript("re_crowd_apply");
+  if (changed) qb_bridge::ExecuteScript("re_crowd_apply");
+}
+
+void SyncParticles(uint8_t* base, int level) {
+  static int s_level = -1;
+  if (!base) return;
+  if (s_level != level) {
+    s_level = level;
+    qb_bridge::ApplyEngineLimitsPatches(base);
+  }
 }
 }  // namespace
 
@@ -440,6 +472,7 @@ void SyncGameMenu(uint8_t* base) {
   if (redraw && !reset) qb_bridge::WriteIntGlobal("re_gfx_redraw", base, 1);   // el menu repinta sus filas
   qb_bridge::WriteIntGlobal("re_gfx_pending", base, NeedsRestart(cur) ? 1 : 0);
   SyncCrowd(base, cur.crowd);
+  SyncParticles(base, cur.particles);
   SyncLanguage(base);
 }
 

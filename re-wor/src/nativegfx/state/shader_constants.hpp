@@ -27,6 +27,13 @@ struct ShaderConstants {
   // b3: Constantes del sistema (NDC, alpha test, resolucion)
   alignas(16) SystemNdcConstants system = {};
 
+  // Versionado monótono por bloque para omisión ultra-rápida de hash y memcpy (cero overhead en draw)
+  uint32_t vs_version = 0;
+  uint32_t ps_version = 0;
+  uint32_t bool_version = 0;
+  uint32_t fetch_version = 0;
+  uint32_t system_version = 0;
+
   // Flags de sucio para subida selectiva
   bool dirty_vs_float = true;
   bool dirty_ps_float = true;

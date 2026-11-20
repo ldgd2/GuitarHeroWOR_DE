@@ -422,7 +422,56 @@ void TestPhase4FullPipeline() {
 
   fp.Shutdown();
   assert(!fp.IsEnabled());
-  printf("OK (FullPipeline D3D11 1080p, 100%% draws y ciclo Swap verificados)\n");
+
+  // Test Fase 4 con backend nativo Direct3D 12
+  bool init_d3d12 = fp.Initialize(nullptr, GraphicsBackendType::D3D12, 1920, 1080);
+  assert(init_d3d12);
+  assert(fp.IsEnabled());
+
+  if (auto* ren = fp.GetRenderer()) {
+    ren->SetVSync(true);
+    assert(ren->GetVSync() == true);
+    ren->SetVSync(false);
+    assert(ren->GetVSync() == false);
+
+    ren->SetAnisotropy(16);
+    assert(ren->GetAnisotropy() == 16);
+    ren->SetAnisotropy(1);
+    assert(ren->GetAnisotropy() == 1);
+  }
+
+  fp.SetGuestMemoryBase(dummy_mem.data());
+  fp.OnDraw(cmd3d);
+  fp.OnDraw(cmd_highway);
+  fp.OnDraw(cmd_hud);
+  fp.OnResolve(res_final);
+  fp.OnSwap();
+
+  fp.Shutdown();
+  assert(!fp.IsEnabled());
+
+  // Test Fase 4 con backend nativo Vulkan
+  bool init_vk = fp.Initialize(nullptr, GraphicsBackendType::Vulkan, 1920, 1080);
+  if (init_vk) {
+    assert(fp.IsEnabled());
+    if (auto* ren = fp.GetRenderer()) {
+      ren->SetVSync(true);
+      assert(ren->GetVSync() == true);
+      ren->SetVSync(false);
+      assert(ren->GetVSync() == false);
+      ren->SetAnisotropy(16);
+      assert(ren->GetAnisotropy() == 16);
+    }
+    fp.SetGuestMemoryBase(dummy_mem.data());
+    fp.OnDraw(cmd3d);
+    fp.OnDraw(cmd_highway);
+    fp.OnDraw(cmd_hud);
+    fp.OnResolve(res_final);
+    fp.OnSwap();
+    fp.Shutdown();
+    assert(!fp.IsEnabled());
+  }
+  printf("OK (FullPipeline D3D11, D3D12 y Vulkan 1080p, 100%% draws y ciclo Swap verificados)\n");
 #else
   printf("SKIPPED (no es Windows)\n");
 #endif

@@ -12,31 +12,6 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
-static bool SafeMemoryCopy(void* dst, const void* src, size_t size) {
-#ifdef _WIN32
-  __try {
-    std::memcpy(dst, src, size);
-    return true;
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return false;
-  }
-#else
-  std::memcpy(dst, src, size);
-  return true;
-#endif
-}
-
-static size_t GetReadableBytes(const void* ptr, size_t max_size) {
-  if (!ptr || max_size == 0) return 0;
-  const uint8_t* p = static_cast<const uint8_t*>(ptr);
-  MEMORY_BASIC_INFORMATION mbi;
-  if (!VirtualQuery(p, &mbi, sizeof(mbi))) return 0;
-  if (mbi.State != MEM_COMMIT) return 0;
-  if ((mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) == 0) return 0;
-  if (mbi.Protect & PAGE_GUARD) return 0;
-  size_t available = mbi.RegionSize - (p - static_cast<const uint8_t*>(mbi.BaseAddress));
-  return std::min(available, max_size);
-}
 
 ComPtr<ID3D11Buffer> CreateConstantBuffer(ID3D11Device* dev, UINT size) {
   D3D11_BUFFER_DESC desc = {};
@@ -118,7 +93,29 @@ void D3D11Renderer::BeginFrame() {
   if (!ctx) return;
 
   is_frame_active_ = true;
+  texture_cache_.BeginFrame(frame_counter_++);
   std::memset(uploaded_pages_mask_, 0, sizeof(uploaded_pages_mask_));
+  last_blend_state_ = nullptr;
+  std::memset(last_blend_factor_, 0, sizeof(last_blend_factor_));
+  last_ds_state_ = nullptr;
+  last_stencil_ref_ = 0xFFFFFFFF;
+  last_rs_state_ = nullptr;
+  last_vs_ = nullptr;
+  last_ps_ = nullptr;
+  last_topo_ = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+  std::memset(last_bound_srv_, 0, sizeof(last_bound_srv_));
+  std::memset(last_bound_sampler_, 0, sizeof(last_bound_sampler_));
+  std::memset(last_tex_hash_, 0, sizeof(last_tex_hash_));
+  std::memset(last_cached_srv_, 0, sizeof(last_cached_srv_));
+  std::memset(last_cached_smp_, 0, sizeof(last_cached_smp_));
+  guest_srv_bound_ = false;
+  last_gs_ = nullptr;
+  std::memset(&last_scissor_rect_, 0, sizeof(last_scissor_rect_));
+  std::memset(last_cb_version_, 0, sizeof(last_cb_version_));
+  last_draw_fetch_version_ = 0xFFFFFFFF;
+  last_ib_addr_ = 0;
+  last_ib_count_ = 0;
+  last_ib_format_ = IndexFormat::Index16;
 
   ID3D11RenderTargetView* rtv = device_ctx_.GetBackBufferRTV();
   ID3D11DepthStencilView* dsv = device_ctx_.GetDefaultDSV();
@@ -135,44 +132,71 @@ void D3D11Renderer::BeginFrame() {
   vp.MinDepth = 0.0f;
   vp.MaxDepth = 1.0f;
   ctx->RSSetViewports(1, &vp);
+
+  // Vincular ranuras fijas de buffers de constantes una vez por cuadro
+  ID3D11Buffer* vcb[4] = {cb_vs_c_.Get(), cb_bl_.Get(), cb_fc_.Get(), cb_sys_.Get()};
+  ID3D11Buffer* pcb[4] = {cb_ps_c_.Get(), cb_bl_.Get(), cb_fc_.Get(), cb_sys_.Get()};
+  ctx->VSSetConstantBuffers(0, 4, vcb);
+  ctx->PSSetConstantBuffers(0, 4, pcb);
 }
 
 void D3D11Renderer::UpdateConstantBuffers(const ShaderConstants& constants) {
   ID3D11DeviceContext* ctx = device_ctx_.GetContext();
   if (!ctx) return;
 
-  ctx->UpdateSubresource(cb_vs_c_.Get(), 0, nullptr, constants.vs_float, 0, 0);
-  ctx->UpdateSubresource(cb_ps_c_.Get(), 0, nullptr, constants.ps_float, 0, 0);
+  if (constants.vs_version != last_cb_version_[0]) {
+    ctx->UpdateSubresource(cb_vs_c_.Get(), 0, nullptr, constants.vs_float, 0, 0);
+    last_cb_version_[0] = constants.vs_version;
+  }
 
-  // Buffer de Bools y Loops combinados (160 bytes)
-  uint8_t bl_data[160] = {};
-  std::memcpy(bl_data, constants.bool_bits, sizeof(constants.bool_bits));
-  std::memcpy(bl_data + 32, constants.loop_consts, sizeof(constants.loop_consts));
-  ctx->UpdateSubresource(cb_bl_.Get(), 0, nullptr, bl_data, 0, 0);
+  if (constants.ps_version != last_cb_version_[1]) {
+    ctx->UpdateSubresource(cb_ps_c_.Get(), 0, nullptr, constants.ps_float, 0, 0);
+    last_cb_version_[1] = constants.ps_version;
+  }
 
-  ctx->UpdateSubresource(cb_fc_.Get(), 0, nullptr, constants.fetch_consts, 0, 0);
-  ctx->UpdateSubresource(cb_sys_.Get(), 0, nullptr, &constants.system, 0, 0);
+  if (constants.bool_version != last_cb_version_[2]) {
+    uint8_t bl_data[160] = {};
+    std::memcpy(bl_data, constants.bool_bits, sizeof(constants.bool_bits));
+    std::memcpy(bl_data + 32, constants.loop_consts, sizeof(constants.loop_consts));
+    ctx->UpdateSubresource(cb_bl_.Get(), 0, nullptr, bl_data, 0, 0);
+    last_cb_version_[2] = constants.bool_version;
+  }
 
-  ID3D11Buffer* vcb[4] = {cb_vs_c_.Get(), cb_bl_.Get(), cb_fc_.Get(), cb_sys_.Get()};
-  ID3D11Buffer* pcb[4] = {cb_ps_c_.Get(), cb_bl_.Get(), cb_fc_.Get(), cb_sys_.Get()};
+  if (constants.fetch_version != last_cb_version_[3]) {
+    ctx->UpdateSubresource(cb_fc_.Get(), 0, nullptr, constants.fetch_consts, 0, 0);
+    last_cb_version_[3] = constants.fetch_version;
+  }
 
-  ctx->VSSetConstantBuffers(0, 4, vcb);
-  ctx->PSSetConstantBuffers(0, 4, pcb);
+  if (constants.system_version != last_cb_version_[4]) {
+    ctx->UpdateSubresource(cb_sys_.Get(), 0, nullptr, &constants.system, 0, 0);
+    last_cb_version_[4] = constants.system_version;
+  }
 }
 
 void D3D11Renderer::RenderDraw(const DrawCommand& cmd, const uint8_t* guest_memory_base) {
   ID3D11DeviceContext* ctx = device_ctx_.GetContext();
   if (!ctx) return;
 
-  // 1. Estados de pipeline
+  // 1. Estados de pipeline con filtro de redundancia
   ID3D11BlendState* bs = state_cache_.GetOrCreateBlendState(cmd.state.blend);
-  ctx->OMSetBlendState(bs, &cmd.state.blend.blend_constant.x, 0xFFFFFFFF);
+  if (bs != last_blend_state_ || std::memcmp(last_blend_factor_, &cmd.state.blend.blend_constant.x, sizeof(last_blend_factor_)) != 0) {
+    ctx->OMSetBlendState(bs, &cmd.state.blend.blend_constant.x, 0xFFFFFFFF);
+    last_blend_state_ = bs;
+    std::memcpy(last_blend_factor_, &cmd.state.blend.blend_constant.x, sizeof(last_blend_factor_));
+  }
 
   ID3D11DepthStencilState* dss = state_cache_.GetOrCreateDepthStencilState(cmd.state.depth_stencil);
-  ctx->OMSetDepthStencilState(dss, cmd.state.depth_stencil.stencil_ref);
+  if (dss != last_ds_state_ || cmd.state.depth_stencil.stencil_ref != last_stencil_ref_) {
+    ctx->OMSetDepthStencilState(dss, cmd.state.depth_stencil.stencil_ref);
+    last_ds_state_ = dss;
+    last_stencil_ref_ = cmd.state.depth_stencil.stencil_ref;
+  }
 
   ID3D11RasterizerState* rs = state_cache_.GetOrCreateRasterizerState(cmd.state.rasterizer);
-  ctx->RSSetState(rs);
+  if (rs != last_rs_state_) {
+    ctx->RSSetState(rs);
+    last_rs_state_ = rs;
+  }
 
   if (cmd.state.rasterizer.scissor_enable) {
     const Rect2D& r = cmd.state.rasterizer.scissor_rect;
@@ -183,11 +207,14 @@ void D3D11Renderer::RenderDraw(const DrawCommand& cmd, const uint8_t* guest_memo
         std::min(static_cast<LONG>(device_ctx_.GetHeight()), static_cast<LONG>(r.bottom))
     };
     if (d3d_rect.right > d3d_rect.left && d3d_rect.bottom > d3d_rect.top) {
-      ctx->RSSetScissorRects(1, &d3d_rect);
+      if (std::memcmp(&d3d_rect, &last_scissor_rect_, sizeof(D3D11_RECT)) != 0) {
+        ctx->RSSetScissorRects(1, &d3d_rect);
+        last_scissor_rect_ = d3d_rect;
+      }
     }
   }
 
-  // 2. Shaders
+  // 2. Shaders con filtro de redundancia
   const auto& vs_info = cmd.state.vertex_shader;
   const auto& ps_info = cmd.state.pixel_shader;
 
@@ -197,14 +224,20 @@ void D3D11Renderer::RenderDraw(const DrawCommand& cmd, const uint8_t* guest_memo
   // Direct3D 11 requiere obligatoriamente un Vertex Shader para emitir geometría
   if (!vs) return;
 
-  ctx->VSSetShader(vs, nullptr, 0);
-  ctx->PSSetShader(ps, nullptr, 0);
+  if (vs != last_vs_) {
+    ctx->VSSetShader(vs, nullptr, 0);
+    last_vs_ = vs;
+  }
+  if (ps != last_ps_) {
+    ctx->PSSetShader(ps, nullptr, 0);
+    last_ps_ = ps;
+  }
 
-  // Geometria especial de rectangulos
-  if (cmd.topology == PrimitiveTopology::RectangleList) {
-    ctx->GSSetShader(shader_cache_.GetRectangleGeometryShader(), nullptr, 0);
-  } else {
-    ctx->GSSetShader(nullptr, nullptr, 0);
+  // Geometria especial de rectangulos (con filtro de redundancia de Geometry Shader)
+  ID3D11GeometryShader* desired_gs = (cmd.topology == PrimitiveTopology::RectangleList) ? shader_cache_.GetRectangleGeometryShader() : nullptr;
+  if (desired_gs != last_gs_) {
+    ctx->GSSetShader(desired_gs, nullptr, 0);
+    last_gs_ = desired_gs;
   }
 
   // 3. Constantes
@@ -241,22 +274,19 @@ void D3D11Renderer::RenderDraw(const DrawCommand& cmd, const uint8_t* guest_memo
 
         if (!all_uploaded) {
           const uint8_t* src_ptr = guest_memory_base + phys_addr;
-          size_t safe_bytes = GetReadableBytes(src_ptr, upload_size);
+          size_t safe_bytes = (phys_addr >= 0x00010000 && (phys_addr + upload_size <= kRawMemBytes)) ? upload_size : 0;
           if (safe_bytes >= 64) {
-            if (temp_upload_.size() < safe_bytes) temp_upload_.resize(safe_bytes);
-            if (SafeMemoryCopy(temp_upload_.data(), src_ptr, safe_bytes)) {
-              D3D11_BOX box = {};
-              box.left = phys_addr;
-              box.right = phys_addr + static_cast<UINT>(safe_bytes);
-              box.top = 0;
-              box.bottom = 1;
-              box.front = 0;
-              box.back = 1;
-              ctx->UpdateSubresource(guest_memory_buffer_.Get(), 0, &box, temp_upload_.data(), 0, 0);
+            D3D11_BOX box = {};
+            box.left = phys_addr;
+            box.right = phys_addr + static_cast<UINT>(safe_bytes);
+            box.top = 0;
+            box.bottom = 1;
+            box.front = 0;
+            box.back = 1;
+            ctx->UpdateSubresource(guest_memory_buffer_.Get(), 0, &box, src_ptr, 0, 0);
 
-              for (uint32_t p = page_start; p <= page_end; ++p) {
-                uploaded_pages_mask_[p >> 6] |= (1ULL << (p & 63));
-              }
+            for (uint32_t p = page_start; p <= page_end; ++p) {
+              uploaded_pages_mask_[p >> 6] |= (1ULL << (p & 63));
             }
           }
         }
@@ -270,72 +300,103 @@ void D3D11Renderer::RenderDraw(const DrawCommand& cmd, const uint8_t* guest_memo
       upload_slot(0);
     }
 
-    ctx->VSSetShaderResources(0, 1, guest_memory_srv_.GetAddressOf());
-    ctx->PSSetShaderResources(0, 1, guest_memory_srv_.GetAddressOf());
-  }
-
-  // 5. Texturas y Samplers
-  for (uint32_t i = 0; i < 32; ++i) {
-    const auto& tex_desc = cmd.state.bound_textures[i];
-    if (tex_desc.IsValid()) {
-      ID3D11ShaderResourceView* srv = texture_cache_.GetOrCreateTexture(tex_desc, guest_memory_base);
-      if (srv) {
-        UINT slot = 1 + i;
-        if (tex_desc.dimension == TextureDimension::ThreeD) {
-          slot = 33 + i;
-        } else if (tex_desc.dimension == TextureDimension::Cube) {
-          slot = 65 + i;
-        }
-        ctx->PSSetShaderResources(slot, 1, &srv);
-      }
-
-      // D3D11 limita estrictamente los samplers a [0..15] (D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT = 16)
-      if (i < 16) {
-        ID3D11SamplerState* smp = state_cache_.GetOrCreateSamplerState(tex_desc);
-        if (smp) {
-          ctx->PSSetSamplers(i, 1, &smp);
-        }
-      }
+    if (!guest_srv_bound_) {
+      ctx->VSSetShaderResources(0, 1, guest_memory_srv_.GetAddressOf());
+      ctx->PSSetShaderResources(0, 1, guest_memory_srv_.GetAddressOf());
+      guest_srv_bound_ = true;
     }
   }
 
-  // 6. Ejecutar Draw
+  // 5. Texturas y Samplers con cache de ranura y filtro de redundancia
+  if (cmd.state.constants.fetch_version != last_draw_fetch_version_) {
+    for (uint32_t i = 0; i < 32; ++i) {
+      const auto& tex_desc = cmd.state.bound_textures[i];
+      if (tex_desc.width > 0 && tex_desc.IsValid()) {
+        uint64_t thash = TextureHash(tex_desc);
+        ID3D11ShaderResourceView* srv = nullptr;
+        ID3D11SamplerState* smp = nullptr;
+
+        if (thash == last_tex_hash_[i] && last_cached_srv_[i]) {
+          srv = last_cached_srv_[i];
+          smp = last_cached_smp_[i];
+        } else {
+          srv = texture_cache_.GetOrCreateTexture(tex_desc, guest_memory_base);
+          smp = (i < 16) ? state_cache_.GetOrCreateSamplerState(tex_desc) : nullptr;
+          last_tex_hash_[i] = thash;
+          last_cached_srv_[i] = srv;
+          last_cached_smp_[i] = smp;
+        }
+
+        if (srv) {
+          UINT slot = 1 + i;
+          if (tex_desc.dimension == TextureDimension::ThreeD) {
+            slot = 33 + i;
+          } else if (tex_desc.dimension == TextureDimension::Cube) {
+            slot = 65 + i;
+          }
+          if (srv != last_bound_srv_[slot]) {
+            ctx->PSSetShaderResources(slot, 1, &srv);
+            last_bound_srv_[slot] = srv;
+          }
+        }
+
+        // D3D11 limita estrictamente los samplers a [0..15]
+        if (i < 16 && smp) {
+          if (smp != last_bound_sampler_[i]) {
+            ctx->PSSetSamplers(i, 1, &smp);
+            last_bound_sampler_[i] = smp;
+          }
+        }
+      }
+    }
+    last_draw_fetch_version_ = cmd.state.constants.fetch_version;
+  }
+
+  // 6. Ejecutar Draw con filtro de redundancia de topologia
   D3D11_PRIMITIVE_TOPOLOGY topo = ToD3DTopology(cmd.topology);
-  ctx->IASetPrimitiveTopology(topo);
+  if (topo != last_topo_) {
+    ctx->IASetPrimitiveTopology(topo);
+    last_topo_ = topo;
+  }
 
   if (cmd.is_indexed && cmd.index_count > 0) {
     // Si los índices están en memoria del juego
     if (cmd.index_buffer_address && guest_memory_base) {
       uint32_t idx_addr = cmd.index_buffer_address & 0x1FFFFFFFu;
       if (idx_addr >= 0x00010000 && idx_addr < (512u << 20)) {
-        const uint8_t* idx_bytes = guest_memory_base + idx_addr;
-        DXGI_FORMAT ifmt = (cmd.index_format == IndexFormat::Index32) ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
-        uint32_t idx_stride = (cmd.index_format == IndexFormat::Index32) ? 4 : 2;
-        uint32_t total_bytes = cmd.index_count * idx_stride;
+        if (idx_addr == last_ib_addr_ && cmd.index_count == last_ib_count_ && cmd.index_format == last_ib_format_ && dynamic_ib_) {
+          // Omitir Map/memcpy/IASetIndexBuffer redundante si es el mismo buffer de indices que el draw previo
+          ctx->DrawIndexed(cmd.index_count, 0, cmd.base_vertex);
+        } else {
+          const uint8_t* idx_bytes = guest_memory_base + idx_addr;
+          DXGI_FORMAT ifmt = (cmd.index_format == IndexFormat::Index32) ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
+          uint32_t idx_stride = (cmd.index_format == IndexFormat::Index32) ? 4 : 2;
+          uint32_t total_bytes = cmd.index_count * idx_stride;
 
-        size_t safe_ib_bytes = GetReadableBytes(idx_bytes, total_bytes);
-        if (safe_ib_bytes >= total_bytes) {
-          ID3D11Device* dev = device_ctx_.GetDevice();
-          if (!dynamic_ib_ || dynamic_ib_size_ < total_bytes) {
-            dynamic_ib_.Reset();
-            D3D11_BUFFER_DESC ibd = {};
-            ibd.ByteWidth = (total_bytes + 65535) & ~65535u;
-            ibd.Usage = D3D11_USAGE_DYNAMIC;
-            ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
-            ibd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-            dev->CreateBuffer(&ibd, nullptr, &dynamic_ib_);
-            dynamic_ib_size_ = ibd.ByteWidth;
-          }
+          size_t safe_ib_bytes = (idx_addr >= 0x00010000 && (idx_addr + total_bytes <= (512u << 20))) ? total_bytes : 0;
+          if (safe_ib_bytes >= total_bytes) {
+            ID3D11Device* dev = device_ctx_.GetDevice();
+            if (!dynamic_ib_ || dynamic_ib_size_ < total_bytes) {
+              dynamic_ib_.Reset();
+              D3D11_BUFFER_DESC ibd = {};
+              ibd.ByteWidth = (total_bytes + 65535) & ~65535u;
+              ibd.Usage = D3D11_USAGE_DYNAMIC;
+              ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+              ibd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+              dev->CreateBuffer(&ibd, nullptr, &dynamic_ib_);
+              dynamic_ib_size_ = ibd.ByteWidth;
+            }
 
-          if (dynamic_ib_) {
-            D3D11_MAPPED_SUBRESOURCE mapped;
-            if (SUCCEEDED(ctx->Map(dynamic_ib_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-              if (SafeMemoryCopy(mapped.pData, idx_bytes, total_bytes)) {
+            if (dynamic_ib_) {
+              D3D11_MAPPED_SUBRESOURCE mapped;
+              if (SUCCEEDED(ctx->Map(dynamic_ib_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+                std::memcpy(mapped.pData, idx_bytes, total_bytes);
                 ctx->Unmap(dynamic_ib_.Get(), 0);
                 ctx->IASetIndexBuffer(dynamic_ib_.Get(), ifmt, 0);
                 ctx->DrawIndexed(cmd.index_count, 0, cmd.base_vertex);
-              } else {
-                ctx->Unmap(dynamic_ib_.Get(), 0);
+                last_ib_addr_ = idx_addr;
+                last_ib_count_ = cmd.index_count;
+                last_ib_format_ = cmd.index_format;
               }
             }
           }
@@ -348,7 +409,26 @@ void D3D11Renderer::RenderDraw(const DrawCommand& cmd, const uint8_t* guest_memo
 }
 
 void D3D11Renderer::RenderResolve(const ResolveCommand& cmd) {
-  // En la Fase 3, los resolves del escenario preparan las texturas que consumirán los pases posteriores
+  if (cmd.dest_texture_address == 0) return;
+  last_draw_fetch_version_ = 0xFFFFFFFF;
+  ID3D11DeviceContext* ctx = device_ctx_.GetContext();
+  ID3D11Texture2D* src_tex = device_ctx_.GetBackBufferTexture();
+  if (!ctx || !src_tex) return;
+
+  D3D11_TEXTURE2D_DESC sd;
+  src_tex->GetDesc(&sd);
+
+  uint32_t w = (cmd.width > 0 && cmd.width <= sd.Width) ? cmd.width : sd.Width;
+  uint32_t h = (cmd.height > 0 && cmd.height <= sd.Height) ? cmd.height : sd.Height;
+
+  ID3D11Texture2D* resolved_tex = texture_cache_.GetOrCreateResolveTexture(cmd.dest_texture_address, w, h, sd.Format);
+  if (resolved_tex) {
+    D3D11_BOX box = {};
+    box.right = w;
+    box.bottom = h;
+    box.back = 1;
+    ctx->CopySubresourceRegion(resolved_tex, 0, 0, 0, 0, src_tex, 0, &box);
+  }
 }
 
 void D3D11Renderer::EndFrame() {

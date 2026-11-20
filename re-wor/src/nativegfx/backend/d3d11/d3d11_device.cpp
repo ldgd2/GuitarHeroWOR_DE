@@ -35,14 +35,14 @@ bool D3D11DeviceContext::Initialize(void* hwnd, uint32_t width, uint32_t height)
     scd.BufferDesc.Width = width_;
     scd.BufferDesc.Height = height_;
     scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    scd.BufferDesc.RefreshRate.Numerator = 60;
+    scd.BufferDesc.RefreshRate.Numerator = 120;
     scd.BufferDesc.RefreshRate.Denominator = 1;
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scd.OutputWindow = static_cast<HWND>(hwnd);
     scd.SampleDesc.Count = 1;
     scd.SampleDesc.Quality = 0;
     scd.Windowed = TRUE;
-    scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
     HRESULT hr = D3D11CreateDeviceAndSwapChain(
         nullptr,
@@ -59,21 +59,38 @@ bool D3D11DeviceContext::Initialize(void* hwnd, uint32_t width, uint32_t height)
         &context_);
 
     if (FAILED(hr)) {
-      // Fallback a nivel de características 11.0 estándar
+      // Fallback a swapchain tradicional si FLIP_DISCARD no esta disponible
+      scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
       hr = D3D11CreateDeviceAndSwapChain(
           nullptr,
           D3D_DRIVER_TYPE_HARDWARE,
           nullptr,
-          0,
-          &feature_levels[1],
-          1,
+          create_flags,
+          feature_levels,
+          2,
           D3D11_SDK_VERSION,
           &scd,
           &swap_chain_,
           &device_,
           &obtained_level,
           &context_);
-      if (FAILED(hr)) return false;
+      if (FAILED(hr)) {
+        // Fallback a nivel de características 11.0 estándar
+        hr = D3D11CreateDeviceAndSwapChain(
+            nullptr,
+            D3D_DRIVER_TYPE_HARDWARE,
+            nullptr,
+            0,
+            &feature_levels[1],
+            1,
+            D3D11_SDK_VERSION,
+            &scd,
+            &swap_chain_,
+            &device_,
+            &obtained_level,
+            &context_);
+        if (FAILED(hr)) return false;
+      }
     }
   } else {
     // Modo offscreen (headless / render target en memoria)
@@ -98,6 +115,7 @@ bool D3D11DeviceContext::CreateSwapchainResources(uint32_t width, uint32_t heigh
   if (!device_) return false;
 
   back_buffer_rtv_.Reset();
+  back_buffer_texture_.Reset();
   depth_stencil_texture_.Reset();
   default_dsv_.Reset();
 
@@ -108,6 +126,7 @@ bool D3D11DeviceContext::CreateSwapchainResources(uint32_t width, uint32_t heigh
 
     hr = device_->CreateRenderTargetView(back_buffer.Get(), nullptr, &back_buffer_rtv_);
     if (FAILED(hr)) return false;
+    back_buffer_texture_ = back_buffer;
   } else {
     // Offscreen render target
     D3D11_TEXTURE2D_DESC td = {};
@@ -126,6 +145,7 @@ bool D3D11DeviceContext::CreateSwapchainResources(uint32_t width, uint32_t heigh
 
     hr = device_->CreateRenderTargetView(tex.Get(), nullptr, &back_buffer_rtv_);
     if (FAILED(hr)) return false;
+    back_buffer_texture_ = tex;
   }
 
   // Crear buffer de profundidad / plantilla de alta resolución
@@ -153,6 +173,7 @@ void D3D11DeviceContext::Resize(uint32_t width, uint32_t height) {
   height_ = height;
 
   back_buffer_rtv_.Reset();
+  back_buffer_texture_.Reset();
   depth_stencil_texture_.Reset();
   default_dsv_.Reset();
 
@@ -171,6 +192,7 @@ void D3D11DeviceContext::Present(bool vsync) {
 
 void D3D11DeviceContext::Shutdown() {
   back_buffer_rtv_.Reset();
+  back_buffer_texture_.Reset();
   depth_stencil_texture_.Reset();
   default_dsv_.Reset();
   swap_chain_.Reset();

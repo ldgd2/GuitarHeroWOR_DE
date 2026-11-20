@@ -180,13 +180,24 @@ void D3D12DeviceContext::WaitForGpu() {
 }
 
 void D3D12DeviceContext::Present(bool vsync) {
+  if (!command_queue_ || !fence_ || !fence_event_) return;
+
+  uint64_t current_fence = fence_values_[frame_index_] + 1;
+  command_queue_->Signal(fence_.Get(), current_fence);
+  fence_values_[frame_index_] = current_fence;
+
   if (swap_chain_) {
     swap_chain_->Present(vsync ? 1 : 0, 0);
-    WaitForGpu();
     frame_index_ = swap_chain_->GetCurrentBackBufferIndex();
   } else {
-    WaitForGpu();
     frame_index_ = (frame_index_ + 1) % kFrameBufferCount;
+  }
+
+  // Espera no bloqueante: solo esperar si el siguiente búfer aún está en vuelo en GPU
+  uint64_t next_fence = fence_values_[frame_index_];
+  if (fence_->GetCompletedValue() < next_fence) {
+    fence_->SetEventOnCompletion(next_fence, fence_event_);
+    WaitForSingleObject(fence_event_, INFINITE);
   }
 }
 
