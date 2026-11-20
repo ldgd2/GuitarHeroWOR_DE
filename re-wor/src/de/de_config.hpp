@@ -197,6 +197,7 @@ struct HotkeyConfig {
 // cvar user_language del SDK). Requiere reiniciar.
 struct GameConfig {
   std::string language = "en";   // en, es, fr, de, it
+  std::string game_path = "";    // Ruta personalizada donde residen los datos del juego
 };
 
 struct Config {

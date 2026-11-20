@@ -142,7 +142,16 @@ std::mutex& Mutex() {
 }
 
 std::filesystem::path ConfigPath() {
-  return re_wor::core::get_base_directory() / "re_wor_de.toml";
+  std::error_code ec;
+  auto exe_cfg = re_wor::core::get_executable_directory() / "re_wor_de.toml";
+  if (std::filesystem::exists(exe_cfg, ec)) {
+    return exe_cfg;
+  }
+  auto base_cfg = re_wor::core::get_base_directory() / "re_wor_de.toml";
+  if (std::filesystem::exists(base_cfg, ec)) {
+    return base_cfg;
+  }
+  return exe_cfg;
 }
 
 void Load() {
@@ -251,6 +260,7 @@ void Load() {
       c.game.language = (*game)["language"].value_or(c.game.language);
       if (c.game.language != "es" && c.game.language != "fr" && c.game.language != "de" && c.game.language != "it")
         c.game.language = "en";
+      c.game.game_path = (*game)["game_path"].value_or(c.game.game_path);
     }
     if (auto perf = tbl["performance"].as_table()) {
       c.perf.trace_probes = (*perf)["trace_probes"].value_or(c.perf.trace_probes);
@@ -412,7 +422,11 @@ bool Save() {
                       {"debug_menu", c.hotkeys.debug_menu}};
 
   toml::table root;
-  root.insert("game", toml::table{{"language", c.game.language}});
+  toml::table game_tbl{{"language", c.game.language}};
+  if (!c.game.game_path.empty()) {
+    game_tbl.insert("game_path", c.game.game_path);
+  }
+  root.insert("game", std::move(game_tbl));
   root.insert("performance", std::move(perf));
   root.insert("hotkeys", std::move(hotkeys));
   root.insert("input", std::move(input));
